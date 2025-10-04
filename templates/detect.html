@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block content %}
+<h2 class="mb-4">Deteksi Kedipan Mata</h2>
+<p>Klik tombol <b>Mulai Deteksi</b> untuk menyalakan kamera</p>
+
+<div id="cameraBox" class="mx-auto"
+    style="display:none; width:480px; height:360px; border:3px solid #444; border-radius:12px; box-shadow:0 0 10px rgba(0,0,0,0.5);">
+    <video id="video" autoplay playsinline style="width:100%; height:100%;"></video>
+</div>
+
+<div class="mt-3">
+    <button id="startBtn" class="btn btn-primary">Mulai Deteksi</button>
+    <button id="stopBtn" class="btn btn-danger" style="display:none;">Berhenti Deteksi</button>
+</div>
+
+<p id="blinkCount" class="mt-3 fw-bold text-primary"></p>
+<p id="warning" class="mt-2 fw-bold text-danger"></p>
+
+<script>
+    const video = document.getElementById('video');
+    const cameraBox = document.getElementById('cameraBox');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const blinkCountEl = document.getElementById('blinkCount');
+    const warningEl = document.getElementById('warning');
+
+    let detectionInterval = null;
+    let stream = null;
+
+    // === Beep sound ===
+    const beep = new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
+
+    // Fungsi ambil frame
+    function captureFrame() {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        return canvas.toDataURL("image/jpeg");
+    }
+
+    // Minta izin notifikasi desktop
+    if (Notification.permission !== "granted") {
+        Notification.requestPermission();
+    }
+
+    function showNotification(text) {
+        if (Notification.permission === "granted") {
+            new Notification("EyeCare Alert", {
+                body: text,
+                icon: "https://cdn-icons-png.flaticon.com/512/709/709496.png"
+            });
+        }
+    }
+
+    // Mulai deteksi
+    startBtn.addEventListener('click', () => {
+        navigator.mediaDevices.getUserMedia({ video: true })
+            .then(s => {
+                stream = s;
+                video.srcObject = stream;
+                cameraBox.style.display = "block";
+
+                blinkCountEl.textContent = "Deteksi mata sedang berjalan...";
+                warningEl.textContent = "";
+                startBtn.style.display = "none";
+                stopBtn.style.display = "inline-block";
+
+                detectionInterval = setInterval(() => {
+                    const frame = captureFrame();
+                    fetch("/process_frame", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ image: frame })
+                    })
+                        .then(res => res.json())
+                        .then(data => {
+                            // tampilkan total & rate
+                            blinkCountEl.textContent = `Total Kedipan: ${data.total_blinks} | Rate: ${data.blink_rate}/menit`;
+
+                            // tampilkan warning & notifikasi
+                            if (data.message.includes("⚠️")) {
+                                warningEl.textContent = data.message;
+                                showNotification(data.message);
+                                beep.play(); // bunyi beep
+                            } else {
+                                warningEl.textContent = "";
+                            }
+                        })
+                        .catch(err => console.error(err));
+                }, 1000);
+            })
+            .catch(err => {
+                alert("Tidak bisa mengakses kamera: " + err);
+            });
+    });
+
+    // Berhenti deteksi
+    stopBtn.addEventListener('click', () => {
+        clearInterval(detectionInterval);
+        detectionInterval = null;
+
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+            stream = null;
+        }
+        video.srcObject = null;
+        cameraBox.style.display = "none";
+
+        fetch("/stop_detection")
+            .then(res => res.json())
+            .then(data => {
+                alert(`Deteksi dihentikan. Total Kedipan: ${data.total_blinks} (durasi ${data.duration} detik)`);
+            });
+
+        blinkCountEl.textContent = "Deteksi dihentikan.";
+        warningEl.textContent = "";
+        stopBtn.style.display = "none";
+        startBtn.style.display = "inline-block";
+    });
+</script>
+{% endblock %}

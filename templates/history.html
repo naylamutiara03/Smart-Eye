@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+  <h2 class="mb-4">History Deteksi Kedipan</h2>
+
+  {% if records %}
+    <table class="table table-bordered table-hover text-center">
+      <thead class="table-dark">
+        <tr>
+          <th>No</th>
+          <th>Waktu Selesai</th>
+          <th>Total Kedipan</th>
+          <th>Durasi (detik)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in records %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ r['time'] }}</td>
+          <td>{{ r['blinks'] }}</td>
+          <td>{{ r['duration'] }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="text-muted">Belum ada history deteksi.</p>
+  {% endif %}
+{% endblock %}
