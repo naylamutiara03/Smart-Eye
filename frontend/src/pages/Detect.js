@@ -44,6 +44,9 @@ function Detect() {
     const [isDetecting, setIsDetecting] = useState(false);
     const [stats, setStats] = useState({ total_blinks: 0, blink_rate: 0 });
     const [warning, setWarning] = useState('');
+    const [warningText, setWarningText] = useState('');
+    const [showHistoryButton, setShowHistoryButton] = useState(false);
+
 
     const videoRef = useRef(null);
     const streamRef = useRef(null);
@@ -172,7 +175,11 @@ function Detect() {
 
         if (saveRecord) {
             try {
-                const res = await axios.post(`${API_URL}/stop_detection`);
+                const res = await axios.post(`${API_URL}/stop_detection`, {
+                    total_blinks: stats.total_blinks,
+                    blink_rate: stats.blink_rate,
+                    timestamp: new Date().toISOString()
+                });
 
                 // Buat pesan sukses.
                 const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`;
@@ -205,7 +212,9 @@ function Detect() {
                 // Gabungkan pesan sukses dengan tombol riwayat.
                 // Catatan: Pastikan komponen yang menampilkan 'warning' menggunakan dangerouslySetInnerHTML 
                 // agar tag <a> HTML ini dapat di-render dengan benar.
-                setWarning(`${successMessage}. ${historyButtonHtml}`);
+                setWarningText(`✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`);
+                setShowHistoryButton(true);
+
 
             } catch (err) {
                 console.error("Error stopping detection:", err);
@@ -409,18 +418,42 @@ function Detect() {
                         </div>
 
                         {/* Warning / Notification Area */}
-                        {warning && (
+                        {warningText && (
                             <div style={{
                                 marginTop: '1rem',
                                 padding: '1rem',
                                 fontWeight: '500',
                                 borderRadius: '0.5rem',
                                 boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-                                borderLeft: warning.startsWith('⚠️') ? '4px solid #f59e0b' : warning.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
-                                backgroundColor: warning.startsWith('⚠️') ? '#fffbe6' : warning.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
-                                color: warning.startsWith('⚠️') ? '#b58b02' : warning.startsWith('✅') ? '#047857' : '#b91c1c',
+                                borderLeft: warningText.startsWith('⚠️') ? '4px solid #f59e0b' : warningText.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
+                                backgroundColor: warningText.startsWith('⚠️') ? '#fffbe6' : warningText.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
+                                color: warningText.startsWith('⚠️') ? '#b58b02' : warningText.startsWith('✅') ? '#047857' : '#b91c1c',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.75rem',
                             }}>
-                                {warning}
+                                <span>{warningText}</span>
+
+                                {showHistoryButton && (
+                                    <a
+                                        href="/history"
+                                        style={{
+                                            alignSelf: 'flex-start',
+                                            padding: '0.5rem 1rem',
+                                            backgroundColor: '#10B981',
+                                            color: 'white',
+                                            borderRadius: '0.5rem',
+                                            textDecoration: 'none',
+                                            fontWeight: '600',
+                                            transition: 'background-color 0.3s ease',
+                                            boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                                        }}
+                                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
+                                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10B981'}
+                                    >
+                                        Lihat Riwayat
+                                    </a>
+                                )}
                             </div>
                         )}
                     </div>
