@@ -347,9 +347,9 @@ function Detect() {
             {/* Wrapper Card & API Info */}
             <div className="flex flex-col items-center w-full">
 
-                <h1 style={{ color: primaryColor, fontSize: '2.5rem', fontWeight: '800', marginBottom: '1.5rem' }}>
+                {/* <h1 style={{ color: primaryColor, fontSize: '2.5rem', fontWeight: '800', marginBottom: '1.5rem' }}>
                     EyeCare Blink Detector
-                </h1>
+                </h1> */}
 
                 {/* Main Responsive Content Area (Left and Right Panel) */}
                 <div style={contentWrapperStyle}>
