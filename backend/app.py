@@ -35,10 +35,30 @@ def api_home():
 @app.route('/history', methods=['GET'])
 def get_history():
     # Mengambil data dari Supabase dan mengembalikannya sebagai JSON
+    #  Menggunakan captured_at & dukung filter user_id/device_id
     try:
-        response = supabase.table("blink_history").select("*").order("time", desc=True).limit(20).execute()
+        user_id = request.args.get("user_id", type=int)
+        device_id = request.args.get("device_id", type=int)
+        limit = request.args.get("limit", default=20, type=int)
+
+        q = supabase.table("blink_history").select("*")
+        if user_id is not None:
+            q = q.eq("user_id", user_id)
+        if device_id is not None:
+            q = q.eq("device_id", device_id)
+
+        response = q.order("captured_at", desc=True).limit(limit).execute()  # kolom ERD
         records = response.data
         return jsonify(records)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/history/<int:record_id>', methods=['DELETE'])
+def delete_history(record_id):
+    """Menghapus 1 record dari blink_history berdasarkan ID"""
+    try:
+        supabase.table("blink_history").delete().eq("id", record_id).execute()
+        return jsonify({"message": f"Record dengan ID {record_id} berhasil dihapus"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -61,69 +81,94 @@ def process_frame():
 
     faces = detector(gray)
     message = "Wajah tidak terdeteksi." # Pesan default
+    blink_rate = len(BLINK_TIMESTAMPS)  # default agar variabel selalu ada
 
     if len(faces) > 0:
-      for face in faces:
-          landmarks = predictor(gray, face)
-          left_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
-          right_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
-          ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
+        for face in faces:
+            landmarks = predictor(gray, face)
+            left_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
+            right_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
+            ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
 
-          if ear < EAR_THRESHOLD and not EYE_CLOSED:
-              EYE_CLOSED = True
-          elif ear >= EAR_THRESHOLD and EYE_CLOSED:
-              TOTAL_BLINKS += 1
-              LAST_BLINK_TIME = time.time()
-              EYE_CLOSED = False
-              BLINK_TIMESTAMPS.append(LAST_BLINK_TIME)
+            if ear < EAR_THRESHOLD and not EYE_CLOSED:
+                EYE_CLOSED = True
+            elif ear >= EAR_THRESHOLD and EYE_CLOSED:
+                TOTAL_BLINKS += 1
+                LAST_BLINK_TIME = time.time()
+                EYE_CLOSED = False
+                BLINK_TIMESTAMPS.append(LAST_BLINK_TIME)
 
-      now = time.time()
-      while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > 60:
-          BLINK_TIMESTAMPS.popleft()
+        now = time.time()
+        while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > 60:
+            BLINK_TIMESTAMPS.popleft()
 
-      blink_rate = len(BLINK_TIMESTAMPS)
+        blink_rate = len(BLINK_TIMESTAMPS)
 
-      if now - LAST_BLINK_TIME > 10: # Peringatan jika tidak berkedip selama 10 detik
-          message = "⚠️ Anda sudah lama tidak berkedip. Istirahatkan mata Anda!"
-      elif blink_rate > 30:
-          message = "⚠️ Kedipan terlalu sering. Mungkin mata Anda lelah."
-      else:
-          message = "Deteksi berjalan normal."
-    
+        if now - LAST_BLINK_TIME > 10: # Peringatan jika tidak berkedip selama 10 detik
+            message = "⚠️ Anda sudah lama tidak berkedip. Istirahatkan mata Anda!"
+        elif blink_rate > 30:
+            message = "⚠️ Kedipan terlalu sering. Mungkin mata Anda lelah."
+        else:
+            message = "Deteksi berjalan normal."
+
     return jsonify({
         "message": message,
         "total_blinks": TOTAL_BLINKS,
         "blink_rate": blink_rate
     })
 
-
-@app.route('/stop_detection', methods=['POST']) # Ubah ke POST untuk konsistensi
+@app.route('/stop_detection', methods=['POST'])
 def stop_detection():
-    global TOTAL_BLINKS, START_TIME
+    global TOTAL_BLINKS, START_TIME, LAST_BLINK_TIME, BLINK_TIMESTAMPS
 
     if START_TIME is None:
         return jsonify({"error": "Detection never started"}), 400
 
     duration = int(time.time() - START_TIME)
-    
-    # Hanya simpan jika durasi lebih dari beberapa detik, misal 10 detik
-    if duration > 10 and TOTAL_BLINKS > 0:
+
+    # Ambil data user & device dari payload
+    payload = request.get_json(silent=True) or {}
+    user_id = payload.get("user_id")
+    device_id = payload.get("device_id")
+
+    if user_id is None or device_id is None:
+        return jsonify({"error": "user_id dan device_id wajib dikirim"}), 400
+
+    if duration > 10 and TOTAL_BLINKS >= 0:
+        # Hitung hasil deteksi akhir
+        blink_count = TOTAL_BLINKS
+        bpm = round(blink_count / max(duration / 60.0, 1e-6), 2)
+        stare_duration_sec = int(time.time() - LAST_BLINK_TIME)
+        warning_triggered = stare_duration_sec > 10
+        now_iso = datetime.datetime.utcnow().isoformat()
+
         record = {
-            "time": datetime.datetime.now().isoformat(),
-            "blinks": TOTAL_BLINKS,
-            "duration": duration
+            "user_id": int(user_id),
+            "device_id": int(device_id),
+            "captured_at": now_iso,
+            "blink_count": blink_count,
+            "blink_per_minute": bpm,
+            "stare_duration_sec": stare_duration_sec,
+            "warning_triggered": warning_triggered,
+            "note": "auto-summary",
+            "created_at": now_iso
         }
+
         try:
             supabase.table("blink_history").insert(record).execute()
         except Exception as e:
             print(f"Error saving to Supabase: {e}")
 
-    response_data = {"total_blinks": TOTAL_BLINKS, "duration": duration}
+    response_data = {
+        "total_blinks": TOTAL_BLINKS,
+        "duration": duration
+    }
 
     # Reset state
     TOTAL_BLINKS = 0
     START_TIME = None
-    
+    BLINK_TIMESTAMPS.clear()
+
     return jsonify(response_data)
 
 if __name__ == '__main__':
