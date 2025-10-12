@@ -136,33 +136,36 @@ def stop_detection():
     if START_TIME is None:
         return jsonify({"error": "Detection never started"}), 400
 
+    # Hitung durasi dan kecepatan kedipan
     duration_sec = int(time.time() - START_TIME)
     blink_per_minute = round((TOTAL_BLINKS / (duration_sec / 60)), 2) if duration_sec > 0 else 0.0
-    warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10  # contoh logika sederhana
+    warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10  # logika sederhana
 
     # Simpan hanya jika deteksi cukup lama & ada kedipan
     if duration_sec > 10 and TOTAL_BLINKS > 0:
         record = {
             "blink_count": TOTAL_BLINKS,
             "stare_duration_sec": duration_sec,
-            # 🟢 pastikan dikonversi ke int agar tidak error bigint di Supabase
-            "blink_per_minute": int(blink_per_minute),
+            "blink_per_minute": int(blink_per_minute),  # ✅ biarkan float
             "warning_triggered": warning_triggered,
             "note": "Auto-saved from Smart Eye",
-            "captured_at": datetime.datetime.utcnow().isoformat(),
+            # ✅ gunakan format waktu ISO + Z agar terbaca timezone UTC
+            "captured_at": datetime.datetime.utcnow().isoformat() + "Z",
             "user_id": USER_ID,
             "device_id": DEVICE_ID,
-            "created_at": datetime.datetime.utcnow().isoformat()
+            "created_at": datetime.datetime.utcnow().isoformat() + "Z"
         }
         try:
             supabase.table("blink_history").insert(record).execute()
         except Exception as e:
             print(f"Error saving to Supabase: {e}")
 
+    # 🟢 Kembalikan data ke frontend (pastikan field sesuai frontend)
     response_data = {
+        "message": "✅ Sesi selesai",
         "total_blinks": TOTAL_BLINKS,
-        "duration_sec": duration_sec,
-        "blink_per_minute": blink_per_minute
+        "duration": duration_sec,          # 🟢 ubah jadi `duration`
+        "blink_rate": blink_per_minute,    # 🟢 samakan istilah dengan frontend
     }
 
     # Reset state
@@ -170,6 +173,7 @@ def stop_detection():
     START_TIME = None
 
     return jsonify(response_data)
+
 
 
 if __name__ == '__main__':
