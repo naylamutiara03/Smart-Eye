@@ -45,9 +45,9 @@ function Home() {
 
             if (todayRecords.length > 0) {
                 const labels = todayRecords.map(r => new Date(r.captured_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }));
-                const blinksPerMinute = todayRecords.map(r => 
-                    r.stare_duration_sec > 0 
-                        ? ((r.blink_count / r.stare_duration_sec) * 60).toFixed(2) 
+                const blinksPerMinute = todayRecords.map(r =>
+                    r.stare_duration_sec > 0
+                        ? ((r.blink_count / r.stare_duration_sec) * 60).toFixed(2)
                         : 0
                 );
 
@@ -73,9 +73,9 @@ function Home() {
 
             if (sortedDays.length > 0) {
                 const labels = sortedDays.map(day => day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }));
-                const blinksPerMinute = sortedDays.map(day => 
-                    day.totalDurationSec > 0 
-                        ? ((day.totalBlinkCount / day.totalDurationSec) * 60).toFixed(2) 
+                const blinksPerMinute = sortedDays.map(day =>
+                    day.totalDurationSec > 0
+                        ? ((day.totalBlinkCount / day.totalDurationSec) * 60).toFixed(2)
                         : 0
                 );
 
@@ -94,7 +94,7 @@ function Home() {
                 if (!records || records.length === 0) {
                     throw new Error("Belum ada data history.");
                 }
-                
+
                 processTodayData(records);
                 processDailyData(records);
 
