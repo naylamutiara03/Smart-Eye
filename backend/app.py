@@ -23,7 +23,9 @@ EYE_CLOSED = False
 USER_ID = 1
 DEVICE_ID = 2
 
+
 def eye_aspect_ratio(eye):
+    """Hitung Eye Aspect Ratio (EAR)"""
     A = np.linalg.norm(eye[1] - eye[5])
     B = np.linalg.norm(eye[2] - eye[4])
     C = np.linalg.norm(eye[0] - eye[3])
@@ -55,6 +57,7 @@ def get_history():
 def process_frame():
     global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS
 
+    # Inisialisasi awal deteksi
     if START_TIME is None:
         START_TIME = time.time()
         LAST_BLINK_TIME = time.time()
@@ -69,7 +72,7 @@ def process_frame():
 
     faces = detector(gray)
     message = "Wajah tidak terdeteksi."
-    blink_count = 0  # default agar tidak undefined
+    blink_count = 0  # default
 
     if len(faces) > 0:
         for face in faces:
@@ -87,15 +90,22 @@ def process_frame():
                 BLINK_TIMESTAMPS.append(LAST_BLINK_TIME)
 
         now = time.time()
+
+        # Hapus kedipan yang lebih dari 60 detik lalu
         while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > 60:
             BLINK_TIMESTAMPS.popleft()
 
         blink_count = len(BLINK_TIMESTAMPS)
 
-        # Hitung blink rate (kedipan per menit)
+        # --- 🟢 Hitung blink rate (kedipan per menit) ---
         elapsed_time = now - START_TIME
-        blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60, 2) if elapsed_time > 0 else 0
+        if elapsed_time > 10:
+            blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60, 2)
+        else:
+            blink_rate = 0
+        # -------------------------------------------------
 
+        # Beri pesan sesuai kondisi
         if now - LAST_BLINK_TIME > 10:
             message = "⚠️ Anda sudah lama tidak berkedip. Istirahatkan mata Anda!"
         elif blink_count > 30:
@@ -107,7 +117,7 @@ def process_frame():
             "message": message,
             "total_blinks": TOTAL_BLINKS,
             "blink_count": blink_count,
-            "blink_rate": blink_rate  # 🟢 Tambahkan ini
+            "blink_rate": blink_rate
         })
 
     # Jika wajah tidak terdeteksi
@@ -115,7 +125,7 @@ def process_frame():
         "message": message,
         "total_blinks": TOTAL_BLINKS,
         "blink_count": blink_count,
-        "blink_rate": 0  # 🟢 Default agar frontend tidak undefined
+        "blink_rate": 0
     })
 
 
@@ -130,10 +140,12 @@ def stop_detection():
     blink_per_minute = round((TOTAL_BLINKS / (duration_sec / 60)), 2) if duration_sec > 0 else 0.0
     warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10  # contoh logika sederhana
 
+    # Simpan hanya jika deteksi cukup lama & ada kedipan
     if duration_sec > 10 and TOTAL_BLINKS > 0:
         record = {
             "blink_count": TOTAL_BLINKS,
             "stare_duration_sec": duration_sec,
+            # 🟢 pastikan dikonversi ke int agar tidak error bigint di Supabase
             "blink_per_minute": int(blink_per_minute),
             "warning_triggered": warning_triggered,
             "note": "Auto-saved from Smart Eye",
