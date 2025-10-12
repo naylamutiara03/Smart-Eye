@@ -4,226 +4,192 @@ import axios from 'axios';
 // Konfigurasi API
 const API_URL = 'http://127.0.0.1:5000';
 
-// Ikon menggunakan inline SVG (lebih ringan dan mudah disesuaikan)
+// === CHANGED: sementara hardcode user/device; nanti ambil dari auth/device manager ===
+const USER_ID = 1;       // FK → profiles.id
+const DEVICE_ID = 2;     // FK → devices.id
+const SESSION_ID = null; // opsional (isi kalau kamu sudah punya sesi)
+
+// Ikon inline SVG
 const PlayIcon = (props) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polygon points="5 3 19 12 5 21 5 3"></polygon>
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round">
+      <polygon points="5 3 19 12 5 21 5 3"></polygon>
     </svg>
-);
+  );
 
-const StopIcon = (props) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="5" y="5" width="14" height="14" rx="2" ry="2"></rect>
+  const StopIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round">
+      <rect x="5" y="5" width="14" height="14" rx="2" ry="2"></rect>
     </svg>
-);
+  );
 
-const CameraIcon = (props) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M14.5 4h.5a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h.5"></path>
-        <path d="M18 10l-4 4-2-2"></path>
-        <circle cx="10" cy="10" r="8"></circle>
+  const CameraIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14.5 4h.5a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h.5"></path>
+      <path d="M18 10l-4 4-2-2"></path>
+      <circle cx="10" cy="10" r="8"></circle>
     </svg>
-);
+  );
 
-const BlinksIcon = (props) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="10"></circle>
-        <path d="M8 12s2 1 4 1 4-1 4-1"></path>
-        <line x1="12" y1="8" x2="12" y2="12"></line>
+  const BlinksIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10"></circle>
+      <path d="M8 12s2 1 4 1 4-1 4-1"></path>
+      <line x1="12" y1="8" x2="12" y2="12"></line>
     </svg>
-);
+  );
 
-const RateIcon = (props) => (
-    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+  const RateIcon = (props) => (
+    <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+         viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+         strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
     </svg>
-);
-
-
+  );
 function Detect() {
-    const [isDetecting, setIsDetecting] = useState(false);
-    const [stats, setStats] = useState({ total_blinks: 0, blink_rate: 0 });
-    const [warning, setWarning] = useState('');
-    const [warningText, setWarningText] = useState('');
-    const [showHistoryButton, setShowHistoryButton] = useState(false);
+  const [isDetecting, setIsDetecting] = useState(false);
+  const [stats, setStats] = useState({ total_blinks: 0, blink_rate: 0 });
+  const [warning, setWarning] = useState('');
+  const [warningText, setWarningText] = useState('');
+  const [showHistoryButton, setShowHistoryButton] = useState(false);
 
+  const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const intervalRef = useRef(null);
 
-    const videoRef = useRef(null);
-    const streamRef = useRef(null);
-    const intervalRef = useRef(null);
+  // Audio untuk notifikasi
+  const beep = useRef(new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg"));
 
-    // Audio untuk notifikasi
-    // Pastikan URL ini dapat diakses atau ganti dengan base64 data jika ada masalah
-    const beep = useRef(new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg"));
+  // Fungsi untuk menampilkan notifikasi desktop
+  const showNotification = (text) => {
+    if (Notification.permission === "granted") {
+      if (!document.hidden) return; // hanya saat tab tidak aktif
+      new Notification("EyeCare Alert", {
+        body: text,
+        icon: "https://cdn-icons-png.flaticon.com/512/709/709496.png"
+      });
+    }
+  };
 
-    // Fungsi untuk menampilkan notifikasi desktop
-    const showNotification = (text) => {
-        if (Notification.permission === "granted") {
-            // Hanya tampilkan notifikasi jika tab tidak aktif/tersembunyi
-            if (!document.hidden) return;
-
-            new Notification("EyeCare Alert", {
-                body: text,
-                icon: "https://cdn-icons-png.flaticon.com/512/709/709496.png"
-            });
-        }
+  // Request permission on mount and cleanup on unmount
+  useEffect(() => {
+    if (Notification.permission !== "granted") {
+      Notification.requestPermission();
+    }
+    return () => {
+      stopDetection(false);
     };
+  }, []);
 
-    // Request permission on mount and cleanup on unmount
-    useEffect(() => {
-        if (Notification.permission !== "granted") {
-            Notification.requestPermission();
-        }
+  const captureFrame = () => {
+    if (!videoRef.current || videoRef.current.readyState < 2) return null;
+    const canvas = document.createElement("canvas");
+    const width = 240;
+    const height = (videoRef.current.videoHeight / videoRef.current.videoWidth) * width;
+    canvas.width = width;
+    canvas.height = height;
+    canvas.getContext("2d").drawImage(videoRef.current, 0, 0, width, height);
+    return canvas.toDataURL("image/jpeg", 0.6);
+  };
 
-        return () => {
-            stopDetection(false);
-        };
-    }, []);
+  const startDetection = async () => {
+    try {
+      if (!videoRef.current) {
+        console.error("Video element reference is null.");
+        setWarning("Tidak bisa memulai deteksi. Elemen kamera belum siap.");
+        return;
+      }
 
-    const captureFrame = () => {
-        if (!videoRef.current || videoRef.current.readyState < 2) return null;
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      videoRef.current.srcObject = stream;
+      streamRef.current = stream;
+      setIsDetecting(true);
+      setWarning('');
 
-        const canvas = document.createElement("canvas");
-        // Gunakan lebar yang lebih kecil untuk transfer data yang cepat (misal 240px)
-        const width = 240;
-        const height = (videoRef.current.videoHeight / videoRef.current.videoWidth) * width;
+      // Kirim frame tiap 100ms
+      intervalRef.current = setInterval(async () => {
+        const frame = captureFrame();
+        if (!frame) return;
 
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext("2d").drawImage(videoRef.current, 0, 0, width, height);
-        // Kualitas JPEG yang lebih rendah (cepat)
-        return canvas.toDataURL("image/jpeg", 0.6);
-    };
-
-    const startDetection = async () => {
         try {
-            if (!videoRef.current) {
-                console.error("Video element reference is null.");
-                setWarning("Tidak bisa memulai deteksi. Elemen kamera belum siap.");
-                return;
-            }
-
-            // Meminta akses ke kamera
-            const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-            videoRef.current.srcObject = stream;
-            streamRef.current = stream;
-            setIsDetecting(true);
-            setWarning('');
-
-            // Mulai interval pengiriman frame (100ms interval)
-            intervalRef.current = setInterval(async () => {
-                const frame = captureFrame();
-                if (!frame) return;
-
-                try {
-                    // Coba 3x dengan backoff eksponensial
-                    let res;
-                    for (let i = 0; i < 3; i++) {
-                        try {
-                            res = await axios.post(`${API_URL}/process_frame`, { image: frame });
-                            break; // Berhasil, keluar dari loop
-                        } catch (err) {
-                            if (i < 2) {
-                                await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 500)); // Backoff
-                            } else {
-                                throw err; // Gagal setelah semua percobaan
-                            }
-                        }
-                    }
-
-                    if (!res) return;
-
-                    setStats({
-                        total_blinks: res.data.total_blinks,
-                        blink_rate: res.data.blink_rate
-                    });
-
-                    if (res.data.message.includes("⚠️")) {
-                        setWarning(res.data.message);
-                        showNotification(res.data.message);
-                        beep.current.play().catch(e => console.log("Gagal memutar audio:", e.message));
-                    } else if (res.data.message.includes("✅")) {
-                        // Jangan overwrite warning sesi selesai
-                    } else {
-                        // Hapus warning jika sudah tidak ada peringatan aktif, 
-                        // tetapi pertahankan pesan "sesi selesai" jika ada
-                        if (!warning.startsWith('✅')) {
-                            setWarning('');
-                        }
-                    }
-                } catch (err) {
-                    console.error("Error processing frame:", err);
-                    setWarning("Gagal memproses frame atau koneksi terputus.");
-                    // Stop detection automatically on persistent failure
-                    stopDetection(false);
-                }
-            }, 100);
-
-        } catch (err) {
-            setWarning("❌ Tidak bisa mengakses kamera: " + err.message);
-        }
-    };
-
-    const stopDetection = async (saveRecord = true) => {
-        clearInterval(intervalRef.current);
-        if (streamRef.current) {
-            streamRef.current.getTracks().forEach(track => track.stop());
-            videoRef.current.srcObject = null;
-        }
-        setIsDetecting(false);
-        setStats({ total_blinks: 0, blink_rate: 0 });
-
-        if (saveRecord) {
+          let res;
+          for (let i = 0; i < 3; i++) {
             try {
-                const res = await axios.post(`${API_URL}/stop_detection`, {
-                    total_blinks: stats.total_blinks,
-                    blink_rate: stats.blink_rate,
-                    timestamp: new Date().toISOString()
-                });
-
-                // Buat pesan sukses.
-                const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`;
-
-                // Tambahkan tombol "Lihat Riwayat" (a href="/history").
-                // Styling CSS inline digunakan untuk memastikan tombol terlihat bagus.
-                const historyButtonHtml = `
-            <a href="/history" 
-               style="
-                   margin-left: 1rem; 
-                   padding: 0.5rem 1rem; 
-                   background-color: #10B981; /* Warna hijau keren */
-                   color: white; 
-                   border-radius: 0.5rem; 
-                   text-decoration: none; 
-                   font-weight: 600; 
-                   display: inline-block;
-                   transition: background-color 0.3s ease;
-                   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.06);
-               "
-               onmouseover="this.style.backgroundColor='#059669';"
-               onmouseout="this.style.backgroundColor='#10B981';"
-            >
-                Lihat Riwayat
-            </a>
-        `;
-
-                console.log(`Deteksi dihentikan. Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`);
-
-                // Gabungkan pesan sukses dengan tombol riwayat.
-                // Catatan: Pastikan komponen yang menampilkan 'warning' menggunakan dangerouslySetInnerHTML 
-                // agar tag <a> HTML ini dapat di-render dengan benar.
-                setWarningText(`✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`);
-                setShowHistoryButton(true);
-
-
+              res = await axios.post(`${API_URL}/process_frame`, { image: frame });
+              break;
             } catch (err) {
-                console.error("Error stopping detection:", err);
-                setWarning(`Error saat menghentikan sesi: ${err.message}`);
+              if (i < 2) await new Promise(r => setTimeout(r, Math.pow(2, i) * 500));
+              else throw err;
             }
-        } else {
-            setWarning('');
+          }
+          if (!res) return;
+
+          setStats({
+            total_blinks: res.data.total_blinks,
+            blink_rate: res.data.blink_rate
+          });
+
+          if (res.data.message.includes("⚠️")) {
+            setWarning(res.data.message);
+            showNotification(res.data.message);
+            beep.current.play().catch(e => console.log("Gagal memutar audio:", e.message));
+          } else if (res.data.message.includes("✅")) {
+            // biarkan pesan selesai sesi
+          } else {
+            if (!warning.startsWith('✅')) setWarning('');
+          }
+        } catch (err) {
+          console.error("Error processing frame:", err);
+          setWarning("Gagal memproses frame atau koneksi terputus.");
+          stopDetection(false);
         }
-    };
+      }, 100);
+
+    } catch (err) {
+      setWarning("❌ Tidak bisa mengakses kamera: " + err.message);
+    }
+  };
+
+  const stopDetection = async (saveRecord = true) => {
+    clearInterval(intervalRef.current);
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      videoRef.current.srcObject = null;
+    }
+    setIsDetecting(false);
+    setStats({ total_blinks: 0, blink_rate: 0 });
+
+    if (saveRecord) {
+      try {
+        // === CHANGED: kirim payload sesuai ERD (FK user_id, device_id, session_id opsional)
+        const res = await axios.post(`${API_URL}/stop_detection`, {
+          user_id: USER_ID,         // FK → profiles.id
+          device_id: DEVICE_ID,     // FK → devices.id
+          session_id: SESSION_ID    // opsional; abaikan jika belum ada tabel sesi
+          // (tidak perlu kirim total_blinks/blink_rate; backend menghitung sendiri)
+        });
+
+        // Buat pesan sukses.
+        const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks} (durasi ${res.data.duration} detik)`;
+        console.log(`Deteksi dihentikan. ${successMessage}`);
+
+        setWarningText(successMessage);
+        setShowHistoryButton(true);
+      } catch (err) {
+        console.error("Error stopping detection:", err);
+        setWarning(`Error saat menghentikan sesi: ${err.message}`);
+      }
+    } else {
+      setWarning('');
+    }
+  };
 
     // --- Inline Styles (CSS Properties with Responsive Mindset) ---
     const primaryColor = '#3b82f6'; // blue-500 (Cleaner primary color)
