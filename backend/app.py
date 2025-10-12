@@ -42,10 +42,10 @@ def get_history():
         limit = request.args.get("limit", default=20, type=int)
 
         q = supabase.table("blink_history").select("*")
-        if user_id is not None:
-            q = q.eq("user_id", user_id)
-        if device_id is not None:
-            q = q.eq("device_id", device_id)
+        if user_id is not None and user_id <= 0:
+            return jsonify({"error": "user_id harus bilangan positif"}), 400
+        if device_id is not None and device_id <= 0:
+            return jsonify({"error": "device_id harus bilangan positif"}), 400
 
         response = q.order("captured_at", desc=True).limit(limit).execute()  # kolom ERD
         records = response.data
@@ -117,7 +117,7 @@ def process_frame():
         "blink_rate": blink_rate
     })
 
-@app.route('/stop_detection', methods=['POST'])
+@app.route('/stop_detection', methods=['POST']) # Ubah ke POST untuk konsistensi
 def stop_detection():
     global TOTAL_BLINKS, START_TIME, LAST_BLINK_TIME, BLINK_TIMESTAMPS
 
@@ -126,42 +126,66 @@ def stop_detection():
 
     duration = int(time.time() - START_TIME)
 
-    # Ambil data user & device dari payload
+    # Hanya simpan jika durasi lebih dari beberapa detik, misal 10 detik
+    # Mengambil user_id & device_id dari payload untuk FK
     payload = request.get_json(silent=True) or {}
     user_id = payload.get("user_id")
     device_id = payload.get("device_id")
 
     if user_id is None or device_id is None:
-        return jsonify({"error": "user_id dan device_id wajib dikirim"}), 400
+        return jsonify({"error": "user_id dan device_id wajib dikirim pada stop_detection"}), 400
 
     if duration > 10 and TOTAL_BLINKS >= 0:
-        # Hitung hasil deteksi akhir
+        # Menghitung metrik & disimpan ke kolom ERD
         blink_count = TOTAL_BLINKS
-        bpm = round(blink_count / max(duration / 60.0, 1e-6), 2)
+        bpm = round(blink_count / max(duration / 60.0, 1e-6), 2)  # blink_per_minute
         stare_duration_sec = int(time.time() - LAST_BLINK_TIME)
         warning_triggered = stare_duration_sec > 10
         now_iso = datetime.datetime.utcnow().isoformat()
 
-        record = {
-            "user_id": int(user_id),
-            "device_id": int(device_id),
-            "captured_at": now_iso,
-            "blink_count": blink_count,
-            "blink_per_minute": bpm,
-            "stare_duration_sec": stare_duration_sec,
-            "warning_triggered": warning_triggered,
-            "note": "auto-summary",
-            "created_at": now_iso
-        }
-
         try:
+            # Konversi dan validasi sebelum insert - LANGKAH 4
+            record = {
+                "user_id": int(user_id),
+                "device_id": int(device_id),
+                "captured_at": now_iso,
+                "blink_count": int(blink_count),
+                "blink_per_minute": int(round(bpm)),  # 🔵 DIBULATKAN ke integer
+                "stare_duration_sec": int(stare_duration_sec),
+                "warning_triggered": bool(warning_triggered),
+                "note": "auto-summary",
+                "created_at": now_iso
+            }
+
+            # Validasi nilai numeric - LANGKAH 4
+            if record["blink_per_minute"] < 0:
+                record["blink_per_minute"] = 0
+            if record["blink_count"] < 0:
+                record["blink_count"] = 0
+            if record["stare_duration_sec"] < 0:
+                record["stare_duration_sec"] = 0
+
+            # Validasi user_id dan device_id - LANGKAH 4
+            if record["user_id"] <= 0:
+                return jsonify({"error": "user_id harus bilangan positif"}), 400
+            if record["device_id"] <= 0:
+                return jsonify({"error": "device_id harus bilangan positif"}), 400
+
             supabase.table("blink_history").insert(record).execute()
+
+        except ValueError as e:
+            print(f"Error konversi data: {e}")
+            return jsonify({"error": "Data tidak valid: " + str(e)}), 400
         except Exception as e:
             print(f"Error saving to Supabase: {e}")
+            # Jangan return error 500 di sini, karena kita tetap ingin mengembalikan response
+            # data deteksi meskipun gagal menyimpan ke database
+            # Cukup log saja errornya
 
     response_data = {
         "total_blinks": TOTAL_BLINKS,
-        "duration": duration
+        "duration": duration,
+        "saved_to_db": True if duration > 10 and TOTAL_BLINKS >= 0 else False
     }
 
     # Reset state
