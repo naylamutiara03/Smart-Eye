@@ -2,7 +2,16 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
-import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
+import { 
+    Chart as ChartJS, 
+    CategoryScale, 
+    LinearScale, 
+    PointElement, 
+    LineElement, 
+    Title, 
+    Tooltip, 
+    Legend 
+} from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
@@ -16,10 +25,13 @@ function Home() {
         const fetchHistory = async () => {
             try {
                 const response = await axios.get(`${API_URL}/history`);
-                const records = response.data.reverse(); // Balik urutan agar dari terlama ke terbaru
-                
-                const labels = records.map(r => new Date(r.time).toLocaleTimeString('id-ID'));
-                const blinksPerMinute = records.map(r => r.duration > 0 ? ((r.blinks / r.duration) * 60).toFixed(2) : 0);
+                const records = response.data.reverse(); // dari lama ke baru
+
+                // ✅ Sesuaikan field dengan nama di database
+                const labels = records.map(r =>
+                    new Date(r.captured_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
+                );
+                const blinksPerMinute = records.map(r => r.blink_per_minute || 0);
 
                 setChartData({
                     labels,
@@ -28,7 +40,7 @@ function Home() {
                         data: blinksPerMinute,
                         borderColor: 'rgb(75, 192, 192)',
                         backgroundColor: 'rgba(75, 192, 192, 0.5)',
-                        tension: 0.1
+                        tension: 0.2
                     }]
                 });
             } catch (error) {
@@ -47,6 +59,10 @@ function Home() {
             legend: { position: 'top' },
             title: { display: true, text: 'Grafik History Rata-rata Kedipan Mata' },
         },
+        scales: {
+            y: { beginAtZero: true, title: { display: true, text: 'Kedipan/menit' } },
+            x: { title: { display: true, text: 'Waktu' } }
+        }
     };
 
     return (
