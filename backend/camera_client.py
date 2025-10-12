@@ -23,7 +23,7 @@ while True:
         
         # Tampilkan respon dari API
         print(response.json()['message'])
-        print(f"Total Blinks: {response.json()['total_blinks']}")
+        print(f"Total Blinks: {response.json()['blink_counts']}")
         
     except requests.exceptions.ConnectionError:
         print("API server is not running.")
