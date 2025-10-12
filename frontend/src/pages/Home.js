@@ -1,95 +1,152 @@
 // frontend/src/pages/Home.js
-import React, { useState, useEffect } from "react";
-import { Line } from "react-chartjs-2";
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  PointElement,
-  LineElement,
-  Title,
-  Tooltip,
-  Legend,
-} from "chart.js";
-import { fetchHistory } from "../api/blink"; // ✅ gunakan helper API
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+import { Line } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend } from 'chart.js';
+import { Container, Card, Row, Col, Tabs, Tab, Spinner } from 'react-bootstrap';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
-// sementara: hardcode; ganti dari auth/device context kalau sudah ada
-const USER_ID = 1;   // FK → profiles.id
-const DEVICE_ID = 2; // FK → devices.id
+const API_URL = 'http://127.0.0.1:5000';
 
-export default function Home() {
-  const [chartData, setChartData] = useState(null);
-  const [loading, setLoading] = useState(true);
+function Home() {
+    const [todayData, setTodayData] = useState(null);
+    const [dailyData, setDailyData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-  useEffect(() => {
-    let alive = true;
+    // Opsi dan helper function yang tidak bergantung pada state/props bisa tetap di luar
+    const createDataset = (label, data, color) => ({
+        label,
+        data,
+        borderColor: color,
+        backgroundColor: color.replace(')', ', 0.5)').replace('rgb', 'rgba'),
+        tension: 0.2,
+        fill: true,
+    });
 
-    (async () => {
-      try {
-        // ambil 50 data terakhir untuk user+device ini (backend mengembalikan desc)
-        const rowsDesc = await fetchHistory({ userId: USER_ID, deviceId: DEVICE_ID, limit: 50 });
-        const rows = [...(rowsDesc ?? [])].reverse(); // → kronologis (lama → baru)
+    const chartOptions = (title) => ({
+        responsive: true,
+        plugins: {
+            legend: { position: 'bottom' },
+            title: { display: true, text: title, font: { size: 16 } },
+        },
+        scales: { y: { beginAtZero: true } }
+    });
 
-        const labels = rows.map(r =>
-          r.captured_at ? new Date(r.captured_at).toLocaleTimeString("id-ID") : "-"
-        );
 
-        // gunakan langsung kolom blink_per_minute dari ERD
-        const series = rows.map(r =>
-          typeof r.blink_per_minute === "number" ? Number(r.blink_per_minute.toFixed(2)) : 0
-        );
+    useEffect(() => {
+        // **PINDAHKAN FUNGSI KE DALAM USEEFFECT**
+        const processTodayData = (records) => {
+            const today = new Date().toDateString();
+            const todayRecords = records
+                .filter(r => new Date(r.captured_at).toDateString() === today)
+                .sort((a, b) => new Date(a.captured_at) - new Date(b.captured_at));
 
-        if (alive) {
-          setChartData({
-            labels,
-            datasets: [
-              {
-                label: "Rata-rata Kedipan per Menit",
-                data: series,
-                borderColor: "rgb(75, 192, 192)",
-                backgroundColor: "rgba(75, 192, 192, 0.5)",
-                tension: 0.1,
-                pointRadius: 2,
-              },
-            ],
-          });
-        }
-      } catch (err) {
-        console.error("Error fetch history:", err);
-      } finally {
-        if (alive) setLoading(false);
-      }
-    })();
+            if (todayRecords.length > 0) {
+                const labels = todayRecords.map(r => new Date(r.captured_at).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }));
+                const blinksPerMinute = todayRecords.map(r => 
+                    r.stare_duration_sec > 0 
+                        ? ((r.blink_count / r.stare_duration_sec) * 60).toFixed(2) 
+                        : 0
+                );
 
-    return () => { alive = false; };
-  }, []);
+                setTodayData({
+                    labels,
+                    datasets: [createDataset('Rata-rata Kedipan per Menit (Hari Ini)', blinksPerMinute, 'rgb(75, 192, 192)')]
+                });
+            }
+        };
 
-  const options = {
-    responsive: true,
-    plugins: {
-      legend: { position: "top" },
-      title: { display: true, text: "Grafik History Rata-rata Kedipan Mata" },
-      tooltip: { mode: "index", intersect: false },
-    },
-    interaction: { mode: "nearest", intersect: false },
-    scales: {
-      y: { title: { display: true, text: "Kedipan/menit" }, beginAtZero: true },
-      x: { title: { display: true, text: "Waktu" } },
-    },
-  };
+        const processDailyData = (records) => {
+            const dailyAggregates = records.reduce((acc, record) => {
+                const dateKey = new Date(record.captured_at).toISOString().split('T')[0];
+                if (!acc[dateKey]) {
+                    acc[dateKey] = { totalBlinkCount: 0, totalDurationSec: 0, date: new Date(record.captured_at) };
+                }
+                acc[dateKey].totalBlinkCount += record.blink_count;
+                acc[dateKey].totalDurationSec += record.stare_duration_sec;
+                return acc;
+            }, {});
 
-  return (
-    <div className="text-center">
-      <h2>Selamat Datang di EyeCare</h2>
-      <p className="lead">Aplikasi untuk memantau kesehatan mata Anda saat di depan layar.</p>
+            const sortedDays = Object.values(dailyAggregates).sort((a, b) => a.date - b.date);
 
-      <div className="mt-5 card p-3">
-        {loading && <p>Memuat data grafik...</p>}
-        {!loading && chartData && <Line options={options} data={chartData} />}
-        {!loading && !chartData && <p>Gagal memuat data atau belum ada history.</p>}
-      </div>
-    </div>
-  );
+            if (sortedDays.length > 0) {
+                const labels = sortedDays.map(day => day.date.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' }));
+                const blinksPerMinute = sortedDays.map(day => 
+                    day.totalDurationSec > 0 
+                        ? ((day.totalBlinkCount / day.totalDurationSec) * 60).toFixed(2) 
+                        : 0
+                );
+
+                setDailyData({
+                    labels,
+                    datasets: [createDataset('Rata-rata Kedipan per Hari', blinksPerMinute, 'rgb(255, 99, 132)')]
+                });
+            }
+        };
+
+        // Fungsi utama yang menjalankan semuanya
+        const fetchAndProcessHistory = async () => {
+            try {
+                const response = await axios.get(`${API_URL}/history`);
+                const records = response.data;
+                if (!records || records.length === 0) {
+                    throw new Error("Belum ada data history.");
+                }
+                
+                processTodayData(records);
+                processDailyData(records);
+
+            } catch (err) {
+                console.error("Error fetching or processing history:", err);
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchAndProcessHistory();
+
+        // Karena semua fungsi didefinisikan di dalam, dependency array kosong sudah benar
+        // dan tidak akan menimbulkan peringatan lagi.
+    }, []); // <-- Dependency array dibiarkan kosong
+
+    const renderChart = (chartData, title) => {
+        if (loading) return <Spinner animation="border" />;
+        if (!chartData) return <p>Tidak ada data untuk ditampilkan pada periode ini.</p>;
+        return <Line options={chartOptions(title)} data={chartData} />;
+    };
+
+    return (
+        <Container fluid className="p-4">
+            <Row className="mb-4">
+                <Col>
+                    <h2 className="display-6">Selamat Datang di EyeCare 👀</h2>
+                    <p className="lead text-muted">Pantau progres kesehatan mata Anda melalui ringkasan data di bawah ini.</p>
+                </Col>
+            </Row>
+
+            <Tabs defaultActiveKey="today" id="history-tabs" className="mb-3" fill>
+                <Tab eventKey="today" title="Aktivitas Hari Ini">
+                    <Card className="shadow-sm">
+                        <Card.Body>
+                            {renderChart(todayData, 'Detail Sesi Hari Ini')}
+                        </Card.Body>
+                    </Card>
+                </Tab>
+                <Tab eventKey="daily" title="Grafik Harian">
+                     <Card className="shadow-sm">
+                        <Card.Body>
+                            {renderChart(dailyData, 'Rata-rata Kedipan per Hari (Semua Riwayat)')}
+                        </Card.Body>
+                    </Card>
+                </Tab>
+            </Tabs>
+
+             {error && !loading && <p className="text-danger mt-3">Error: {error}</p>}
+        </Container>
+    );
 }
+
+export default Home;
