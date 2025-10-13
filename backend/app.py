@@ -3,6 +3,7 @@ from flask_cors import CORS
 import cv2, dlib, numpy as np, base64, re, time, datetime
 from supabase_client import supabase
 from collections import deque
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -91,21 +92,33 @@ def process_frame():
 
         now = time.time()
 
-        # Hapus kedipan yang lebih dari 60 detik lalu
-        while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > 60:
+        # Hapus kedipan yang lebih dari window_seconds lalu (default 60s)
+        window_seconds = 60
+        while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > window_seconds:
             BLINK_TIMESTAMPS.popleft()
 
+        # blink_count = kedipan dalam window (sliding window)
         blink_count = len(BLINK_TIMESTAMPS)
 
-        # --- 🟢 Hitung blink rate (kedipan per menit) ---
-        elapsed_time = now - START_TIME
-        if elapsed_time > 10:
-            blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60, 2)
+        # --- Hitung blink rate (kedipan per menit) berbasis sliding window ---
+        # Jika ada data dalam window gunakan itu; jika belum, fallback ke TOTAL_BLINKS / elapsed
+        if blink_count > 0:
+            # Real window length = time from oldest timestamp in window sampai sekarang (min window_seconds)
+            actual_window = min(window_seconds, now - BLINK_TIMESTAMPS[0]) if BLINK_TIMESTAMPS else window_seconds
+            # proteksi divzero
+            if actual_window < 1:
+                actual_window = 1.0
+            blink_rate = round((blink_count / actual_window) * 60.0, 2)
         else:
-            blink_rate = 0
+            # fallback: jika session lebih dari 1s, gunakan TOTAL_BLINKS / elapsed_time
+            elapsed_time = now - START_TIME if START_TIME else 0
+            if elapsed_time >= 1:
+                blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60.0, 2)
+            else:
+                blink_rate = 0.0
         # -------------------------------------------------
 
-        # Beri pesan sesuai kondisi
+        # Beri pesan sesuai kondisi (kamu bisa adjust thresholds)
         if now - LAST_BLINK_TIME > 10:
             message = "⚠️ Anda sudah lama tidak berkedip. Istirahatkan mata Anda!"
         elif blink_count > 30:
@@ -129,46 +142,59 @@ def process_frame():
     })
 
 
+
 @app.route('/stop_detection', methods=['POST'])
 def stop_detection():
     global TOTAL_BLINKS, START_TIME
 
-    if START_TIME is None:
-        return jsonify({"error": "Detection never started"}), 400
+    data = request.get_json()
 
-    # Hitung durasi dan kecepatan kedipan
-    duration_sec = int(time.time() - START_TIME)
+    frontend_start_time = data.get('start_time')
+    frontend_end_time = data.get('end_time')
+
+    try:
+        if frontend_start_time and frontend_end_time:
+            start_dt = datetime.fromisoformat(frontend_start_time.replace('Z', '+00:00'))
+            end_dt = datetime.fromisoformat(frontend_end_time.replace('Z', '+00:00'))
+            duration_sec = int((end_dt - start_dt).total_seconds())
+        elif START_TIME:
+            duration_sec = int(time.time() - START_TIME)
+        else:
+            return jsonify({"error": "No valid start time"}), 400
+    except Exception as e:
+        print(f"Error parsing time: {e}")
+        duration_sec = int(time.time() - (START_TIME or time.time()))
+
+    # Hitung blink rate
     blink_per_minute = round((TOTAL_BLINKS / (duration_sec / 60)), 2) if duration_sec > 0 else 0.0
-    warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10  # logika sederhana
+    warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10
 
-    # Simpan hanya jika deteksi cukup lama & ada kedipan
+    # Simpan ke Supabase
     if duration_sec > 10 and TOTAL_BLINKS > 0:
         record = {
             "blink_count": TOTAL_BLINKS,
             "stare_duration_sec": duration_sec,
-            "blink_per_minute": int(blink_per_minute),  # ✅ biarkan float
+            "blink_per_minute": int(blink_per_minute),
             "warning_triggered": warning_triggered,
             "note": "Auto-saved from Smart Eye",
-            # ✅ gunakan format waktu ISO + Z agar terbaca timezone UTC
-            "captured_at": datetime.datetime.utcnow().isoformat() + "Z",
+            "captured_at": datetime.utcnow().isoformat() + "Z",
             "user_id": USER_ID,
             "device_id": DEVICE_ID,
-            "created_at": datetime.datetime.utcnow().isoformat() + "Z"
+            "created_at": datetime.utcnow().isoformat() + "Z"
         }
         try:
             supabase.table("blink_history").insert(record).execute()
         except Exception as e:
             print(f"Error saving to Supabase: {e}")
 
-    # 🟢 Kembalikan data ke frontend (pastikan field sesuai frontend)
     response_data = {
         "message": "✅ Sesi selesai",
         "total_blinks": TOTAL_BLINKS,
-        "duration": duration_sec,          # 🟢 ubah jadi `duration`
-        "blink_rate": blink_per_minute,    # 🟢 samakan istilah dengan frontend
+        "duration": duration_sec,
+        "blink_rate": blink_per_minute,
     }
 
-    # Reset state
+    # Reset variabel global
     TOTAL_BLINKS = 0
     START_TIME = None
 

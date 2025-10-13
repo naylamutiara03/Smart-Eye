@@ -36,7 +36,7 @@ function History() {
               <th>Waktu Terekam</th>
               <th>Total Kedipan</th>
               <th>Durasi (detik)</th>
-              <th>Kedipan/menit</th>
+              {/* <th>Kedipan/menit</th> */}
               <th>Peringatan</th>
               <th>Catatan</th>
             </tr>
@@ -52,7 +52,7 @@ function History() {
                 </td>
                 <td>{r.blink_count}</td>
                 <td>{r.stare_duration_sec}</td>
-                <td>{r.blink_per_minute}</td>
+                {/* <td>{r.blink_per_minute}</td> */}
                 <td>{r.warning_triggered ? "⚠️ Ya" : "✅ Tidak"}</td>
                 <td>{r.note || "-"}</td>
               </tr>
