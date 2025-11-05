@@ -28,6 +28,7 @@ function History() {
   return (
     <div className="container mt-4">
       <h2 className="mb-4 text-center">History Deteksi Kedipan</h2>
+
       {records.length > 0 ? (
         <table className="table table-bordered table-hover text-center">
           <thead className="table-dark">
