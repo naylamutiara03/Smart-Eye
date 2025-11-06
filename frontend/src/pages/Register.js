@@ -1,5 +1,3 @@
-// Register.js
-
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
@@ -19,47 +17,26 @@ function Register() {
     setError('');
     setSuccess('');
 
-    // 🔹 Validasi awal
+    // Validasi dasar
     if (password !== confirmPassword) {
       setError('Password dan konfirmasi password tidak sama.');
       return;
     }
-
     if (password.length < 6) {
       setError('Password minimal 6 karakter.');
       return;
     }
 
     setLoading(true);
-
     try {
-      // 🔹 Cek apakah email sudah digunakan (query langsung ke auth.users)
-      const { data: existingUser, error: checkError } = await supabase
-        .from('auth_emails')
-        .select('email')
-        .eq('email', email)
-        .maybeSingle();
-
-      if (checkError) console.warn('Warning saat cek email:', checkError.message);
-
-      if (existingUser) {
-        setError('Email sudah digunakan. Silakan login atau gunakan email lain.');
-        setLoading(false);
-        return;
-      }
-
-      // 🔹 Sign up user baru
+      // 🔹 Registrasi user baru lewat Supabase Auth
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
       });
 
-      // Handle jika Supabase mengembalikan error
       if (signUpError) {
-        if (
-          signUpError.message.toLowerCase().includes('exists') ||
-          signUpError.message.toLowerCase().includes('already')
-        ) {
+        if (signUpError.message.toLowerCase().includes('exists')) {
           setError('Email sudah digunakan. Silakan login atau gunakan email lain.');
         } else {
           setError('Terjadi kesalahan saat registrasi: ' + signUpError.message);
@@ -67,9 +44,8 @@ function Register() {
         return;
       }
 
-      // 🔹 Jika berhasil (user baru dibuat)
       if (data?.user) {
-        setSuccess('Registrasi berhasil! Silakan cek email Anda untuk verifikasi.');
+        setSuccess('Registrasi berhasil! Silakan cek email untuk verifikasi akun Anda.');
         setTimeout(() => navigate('/login'), 2500);
       } else {
         setError('Registrasi gagal. Silakan coba lagi.');
