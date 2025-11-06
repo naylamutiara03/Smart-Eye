@@ -19,6 +19,7 @@ function Register() {
     setError('');
     setSuccess('');
 
+    // 🔹 Validasi awal
     if (password !== confirmPassword) {
       setError('Password dan konfirmasi password tidak sama.');
       return;
@@ -32,56 +33,50 @@ function Register() {
     setLoading(true);
 
     try {
-      // ✅ 1. Cek apakah email sudah ada di tabel profiles
-      const { data: existingUser, error: fetchError } = await supabase
-        .from('profiles')
+      // 🔹 Cek apakah email sudah digunakan (query langsung ke auth.users)
+      const { data: existingUser, error: checkError } = await supabase
+        .from('auth_emails')
         .select('email')
         .eq('email', email)
         .maybeSingle();
 
+      if (checkError) console.warn('Warning saat cek email:', checkError.message);
+
       if (existingUser) {
-        setError('Email sudah terdaftar. Silakan login atau gunakan email lain.');
+        setError('Email sudah digunakan. Silakan login atau gunakan email lain.');
         setLoading(false);
         return;
       }
 
-      if (fetchError && fetchError.code !== 'PGRST116') {
-        console.error(fetchError);
-      }
-
-      // ✅ 2. Jika belum ada, lanjutkan ke proses sign up
+      // 🔹 Sign up user baru
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
         password,
       });
 
+      // Handle jika Supabase mengembalikan error
       if (signUpError) {
         if (
-          signUpError.message.includes('User already registered') ||
-          signUpError.message.includes('already exists')
+          signUpError.message.toLowerCase().includes('exists') ||
+          signUpError.message.toLowerCase().includes('already')
         ) {
           setError('Email sudah digunakan. Silakan login atau gunakan email lain.');
         } else {
-          setError(signUpError.message);
+          setError('Terjadi kesalahan saat registrasi: ' + signUpError.message);
         }
         return;
       }
 
-      // ✅ 3. Tambahkan ke tabel profiles setelah sign up berhasil
+      // 🔹 Jika berhasil (user baru dibuat)
       if (data?.user) {
-        await supabase.from('profiles').insert([
-          {
-            id: data.user.id,
-            email: data.user.email,
-          },
-        ]);
+        setSuccess('Registrasi berhasil! Silakan cek email Anda untuk verifikasi.');
+        setTimeout(() => navigate('/login'), 2500);
+      } else {
+        setError('Registrasi gagal. Silakan coba lagi.');
       }
-
-      setSuccess('Registrasi berhasil! Silakan cek email Anda untuk verifikasi.');
-      setTimeout(() => navigate('/login'), 2500);
     } catch (err) {
       console.error(err);
-      setError('Terjadi kesalahan saat registrasi. Silakan coba lagi.');
+      setError('Terjadi kesalahan tak terduga saat registrasi.');
     } finally {
       setLoading(false);
     }
