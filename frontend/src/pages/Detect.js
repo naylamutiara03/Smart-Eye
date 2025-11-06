@@ -1,10 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
+// IMPORT PENTING: Untuk mendapatkan sesi pengguna yang sedang login
+import { supabase } from '../supabaseClient'; 
 
 // Konfigurasi API
 const API_URL = 'http://127.0.0.1:5000';
 
-// Ikon menggunakan inline SVG
+// Ikon menggunakan inline SVG (PlayIcon, StopIcon, CameraIcon, BlinksIcon, RateIcon)
+// Dibiarkan sama seperti kode asli Anda
 const PlayIcon = (props) => (
   <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -38,6 +41,7 @@ const RateIcon = (props) => (
     <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
   </svg>
 );
+
 
 function Detect() {
   const [isDetecting, setIsDetecting] = useState(false);
@@ -98,6 +102,14 @@ function Detect() {
         setWarning("❌ Tidak bisa memulai deteksi. Elemen video belum siap.");
         return;
       }
+      
+      // Cek apakah user sudah login sebelum memulai deteksi
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+          setWarning("Anda harus login untuk memulai deteksi.");
+          return;
+      }
+      
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       videoRef.current.srcObject = stream;
       streamRef.current = stream;
@@ -177,40 +189,50 @@ function Detect() {
       streamRef.current = null;
     }
     setIsDetecting(false);
+    
+    // 1. Dapatkan user ID dari Supabase
+    let userId = null;
+    try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+            userId = session.user.id;
+        }
+    } catch (e) {
+        console.error("Gagal mendapatkan sesi Supabase:", e);
+    }
+    
 
     // Capture current stats snapshot before reset (so we send last known)
     const payload = {
       total_blinks: stats.total_blinks,
       blink_rate: stats.blink_rate,
       start_time: startTime,
-      timestamp: new Date().toISOString()
+      end_time: new Date().toISOString(), // Tambahkan end_time untuk backend
+      user_id: userId,
+      device_id: null
     };
 
     // Reset stats displayed to avoid stale UI if user re-starts
     setStats({ total_blinks: 0, blink_rate: 0 });
 
-    if (saveRecord) {
+    if (saveRecord && payload.user_id) { // Pastikan ada user_id untuk menyimpan
       try {
+        // Kirim payload dengan user_id
         const res = await axios.post(`${API_URL}/stop_detection`, payload, { timeout: 8000 });
 
         // success message + tombol riwayat (HTML)
         const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks ?? payload.total_blinks} (durasi ${res.data.duration ?? '?'} detik)`;
 
         const historyButtonHtml = `
-          <a href="/history" 
-             style="
-               margin-left: 1rem; 
-               padding: 0.5rem 1rem; 
-               background-color: #10B981; 
-               color: white; 
-               border-radius: 0.5rem; 
-               text-decoration: none; 
-               font-weight: 600; 
-               display: inline-block;
-             ">
-             Lihat Riwayat
-          </a>
-        `;
+  <a href="/history" 
+    // Ganti menjadi link dengan user_id di query parameter (jika Anda menggunakan React Router)
+    href="/history?user_id=${userId}" 
+    style="
+      /* ... styles */
+    ">
+    Lihat Riwayat
+  </a>
+`;
 
         // set warning (HTML) dan warningText (plain)
         setWarning(`${successMessage}. ${historyButtonHtml}`);
@@ -220,13 +242,17 @@ function Detect() {
         console.log("Deteksi dihentikan. Response:", res.data);
       } catch (err) {
         console.error("Error stopping detection:", err);
-        setWarning(`Error saat menghentikan sesi: ${err?.message || err}`);
+        setWarning(`Error saat menghentikan sesi: ${err?.message || err}. Data mungkin tidak tersimpan.`);
       }
     } else {
       // tidak menyimpan, hanya clear warning
       setWarning('');
       setWarningText('');
       setShowHistoryButton(false);
+      
+      if(saveRecord && !payload.user_id) {
+          setWarning("❌ Gagal menyimpan riwayat. Anda tidak terautentikasi.");
+      }
     }
   };
 
@@ -312,42 +338,40 @@ function Detect() {
             </div>
 
             {/* Warning / Notification Area */}
-            {/* Warning / Notification Area */}
-{(warning || warningText) && (
-  <div style={{
-    marginTop: '1rem',
-    padding: '1rem',
-    fontWeight: '500',
-    borderRadius: '0.5rem',
-    boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)',
-  }}>
-    {warning ? (
-      <div
-        style={{
-          borderLeft: warning.startsWith('⚠️') ? '4px solid #f59e0b' : warning.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
-          backgroundColor: warning.startsWith('⚠️') ? '#fffbe6' : warning.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
-          color: warning.startsWith('⚠️') ? '#b58b02' : warning.startsWith('✅') ? '#047857' : '#b91c1c',
-          padding: '0.5rem',
-          borderRadius: '0.5rem'
-        }}
-        dangerouslySetInnerHTML={{ __html: warning }}
-      />
-    ) : (
-      <div
-        style={{
-          borderLeft: warningText.startsWith('⚠️') ? '4px solid #f59e0b' : warningText.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
-          backgroundColor: warningText.startsWith('⚠️') ? '#fffbe6' : warningText.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
-          color: warningText.startsWith('⚠️') ? '#b58b02' : warningText.startsWith('✅') ? '#047857' : '#b91c1c',
-          padding: '0.5rem',
-          borderRadius: '0.5rem'
-        }}
-      >
-        <span>{warningText}</span>
-      </div>
-    )}
-  </div>
-)}
-
+            {(warning || warningText) && (
+              <div style={{
+                marginTop: '1rem',
+                padding: '1rem',
+                fontWeight: '500',
+                borderRadius: '0.5rem',
+                boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)',
+              }}>
+                {warning ? (
+                  <div
+                    style={{
+                      borderLeft: warning.startsWith('⚠️') ? '4px solid #f59e0b' : warning.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
+                      backgroundColor: warning.startsWith('⚠️') ? '#fffbe6' : warning.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
+                      color: warning.startsWith('⚠️') ? '#b58b02' : warning.startsWith('✅') ? '#047857' : '#b91c1c',
+                      padding: '0.5rem',
+                      borderRadius: '0.5rem'
+                    }}
+                    dangerouslySetInnerHTML={{ __html: warning }}
+                  />
+                ) : (
+                  <div
+                    style={{
+                      borderLeft: warningText.startsWith('⚠️') ? '4px solid #f59e0b' : warningText.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
+                      backgroundColor: warningText.startsWith('⚠️') ? '#fffbe6' : warningText.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
+                      color: warningText.startsWith('⚠️') ? '#b58b02' : warningText.startsWith('✅') ? '#047857' : '#b91c1c',
+                      padding: '0.5rem',
+                      borderRadius: '0.5rem'
+                    }}
+                  >
+                    <span>{warningText}</span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           <div style={rightPanelStyle}>

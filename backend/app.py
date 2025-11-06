@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import cv2, dlib, numpy as np, base64, re, time, datetime
+import cv2, dlib, numpy as np, base64, re, time
+# Perbaikan Import: Tambahkan 'UTC' dari datetime
+from datetime import datetime, timedelta, UTC 
 from supabase_client import supabase
 from collections import deque
-from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -16,13 +17,9 @@ predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 EAR_THRESHOLD = 0.20
 TOTAL_BLINKS = 0
 LAST_BLINK_TIME = time.time()
-START_TIME = None
+START_TIME = None 
 BLINK_TIMESTAMPS = deque()
 EYE_CLOSED = False
-
-# Sementara hardcode, nanti ganti dari Auth Context
-USER_ID = 1
-DEVICE_ID = 2
 
 
 def eye_aspect_ratio(eye):
@@ -40,11 +37,17 @@ def api_home():
 
 @app.route('/history', methods=['GET'])
 def get_history():
-    """Ambil riwayat kedipan dari tabel blink_history"""
+    """Ambil riwayat kedipan dari tabel blink_history untuk USER TERTENTU"""
+    user_id = request.args.get('user_id')
+
+    if not user_id:
+        return jsonify({"error": "User ID is required"}), 400
+
     try:
         response = (
             supabase.table("blink_history")
             .select("*")
+            .eq("user_id", user_id) 
             .order("captured_at", desc=True)
             .limit(20)
             .execute()
@@ -66,7 +69,12 @@ def process_frame():
         EYE_CLOSED = False
 
     data = request.get_json()
-    img_str = re.search(r'base64,(.*)', data['image']).group(1)
+    try:
+        img_str = re.search(r'base64,(.*)', data['image']).group(1)
+    except AttributeError:
+        # Handle jika format base64 tidak ditemukan
+        return jsonify({"error": "Invalid image format"}), 400
+
     nparr = np.frombuffer(base64.b64decode(img_str), np.uint8)
     frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -97,20 +105,15 @@ def process_frame():
         while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > window_seconds:
             BLINK_TIMESTAMPS.popleft()
 
-        # blink_count = kedipan dalam window (sliding window)
         blink_count = len(BLINK_TIMESTAMPS)
 
-        # --- Hitung blink rate (kedipan per menit) berbasis sliding window ---
-        # Jika ada data dalam window gunakan itu; jika belum, fallback ke TOTAL_BLINKS / elapsed
-        if blink_count > 0:
-            # Real window length = time from oldest timestamp in window sampai sekarang (min window_seconds)
-            actual_window = min(window_seconds, now - BLINK_TIMESTAMPS[0]) if BLINK_TIMESTAMPS else window_seconds
-            # proteksi divzero
+        # --- Hitung blink rate (kedipan per menit) ---
+        if blink_count > 0 and BLINK_TIMESTAMPS:
+            actual_window = min(window_seconds, now - BLINK_TIMESTAMPS[0])
             if actual_window < 1:
                 actual_window = 1.0
             blink_rate = round((blink_count / actual_window) * 60.0, 2)
         else:
-            # fallback: jika session lebih dari 1s, gunakan TOTAL_BLINKS / elapsed_time
             elapsed_time = now - START_TIME if START_TIME else 0
             if elapsed_time >= 1:
                 blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60.0, 2)
@@ -118,7 +121,7 @@ def process_frame():
                 blink_rate = 0.0
         # -------------------------------------------------
 
-        # Beri pesan sesuai kondisi (kamu bisa adjust thresholds)
+        # Beri pesan sesuai kondisi 
         if now - LAST_BLINK_TIME > 10:
             message = "⚠️ Anda sudah lama tidak berkedip. Istirahatkan mata Anda!"
         elif blink_count > 30:
@@ -142,65 +145,89 @@ def process_frame():
     })
 
 
-
 @app.route('/stop_detection', methods=['POST'])
 def stop_detection():
-    global TOTAL_BLINKS, START_TIME
+    global TOTAL_BLINKS, START_TIME, BLINK_TIMESTAMPS, EYE_CLOSED, LAST_BLINK_TIME
 
     data = request.get_json()
 
+    current_user_id = data.get('user_id')
+    current_device_id = data.get('device_id') 
+
+    if not current_user_id:
+        TOTAL_BLINKS = 0
+        START_TIME = None
+        BLINK_TIMESTAMPS.clear()
+        EYE_CLOSED = False
+        return jsonify({"message": "Sesi selesai, namun data tidak disimpan. User ID hilang."}), 400
+
     frontend_start_time = data.get('start_time')
     frontend_end_time = data.get('end_time')
+    duration_sec = 0
+    blink_per_minute = 0.0
 
     try:
         if frontend_start_time and frontend_end_time:
-            start_dt = datetime.fromisoformat(frontend_start_time.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(frontend_end_time.replace('Z', '+00:00'))
-            duration_sec = int((end_dt - start_dt).total_seconds())
+             # Menghapus 'Z' jika ada, karena fromisoformat dengan UTC flag akan menanganinya
+             start_dt = datetime.fromisoformat(frontend_start_time.replace('Z', '+00:00'))
+             end_dt = datetime.fromisoformat(frontend_end_time.replace('Z', '+00:00'))
+             duration_sec = int((end_dt - start_dt).total_seconds())
         elif START_TIME:
-            duration_sec = int(time.time() - START_TIME)
+             duration_sec = int(time.time() - START_TIME)
         else:
-            return jsonify({"error": "No valid start time"}), 400
+            duration_sec = 0
     except Exception as e:
-        print(f"Error parsing time: {e}")
-        duration_sec = int(time.time() - (START_TIME or time.time()))
+         print(f"Error parsing time: {e}")
+         duration_sec = int(time.time() - (START_TIME or time.time()))
 
     # Hitung blink rate
     blink_per_minute = round((TOTAL_BLINKS / (duration_sec / 60)), 2) if duration_sec > 0 else 0.0
     warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < 10
 
     # Simpan ke Supabase
-    if duration_sec > 10 and TOTAL_BLINKS > 0:
-        record = {
-            "blink_count": TOTAL_BLINKS,
-            "stare_duration_sec": duration_sec,
-            "blink_per_minute": int(blink_per_minute),
-            "warning_triggered": warning_triggered,
-            "note": "Auto-saved from Smart Eye",
-            "captured_at": datetime.utcnow().isoformat() + "Z",
-            "user_id": USER_ID,
-            "device_id": DEVICE_ID,
-            "created_at": datetime.utcnow().isoformat() + "Z"
-        }
-        try:
-            supabase.table("blink_history").insert(record).execute()
-        except Exception as e:
-            print(f"Error saving to Supabase: {e}")
-
-    response_data = {
-        "message": "✅ Sesi selesai",
-        "total_blinks": TOTAL_BLINKS,
-        "duration": duration_sec,
-        "blink_rate": blink_per_minute,
+    record = {
+        "blink_count": TOTAL_BLINKS,
+        "stare_duration_sec": duration_sec,
+        "blink_per_minute": int(blink_per_minute),
+        "warning_triggered": warning_triggered,
+        "note": "Auto-saved from Smart Eye",
+        # Perbaikan Deprecation: Gunakan datetime.now(UTC).isoformat()
+        "captured_at": datetime.now(UTC).isoformat(),
+        "user_id": current_user_id, 
+        "device_id": current_device_id, 
+        # Perbaikan Deprecation: Gunakan datetime.now(UTC).isoformat()
+        "created_at": datetime.now(UTC).isoformat()
     }
+    
+    # Hanya simpan jika durasi logis dan ada kedipan
+    if duration_sec > 1 and TOTAL_BLINKS >= 0:
+        try:
+            response = supabase.table("blink_history").insert(record).execute()
+        except Exception as e:
+             # Reset global state (meskipun gagal)
+             TOTAL_BLINKS = 0
+             START_TIME = None
+             BLINK_TIMESTAMPS.clear()
+             EYE_CLOSED = False
+             LAST_BLINK_TIME = time.time()
+             # Log 500 Internal Server Error
+             print(f"FATAL Supabase Error: {str(e)}") 
+             return jsonify({"error": f"Gagal menyimpan data ke Supabase: {str(e)}", "debug_data": record}), 500
 
-    # Reset variabel global
+    # Reset variabel global untuk sesi berikutnya
     TOTAL_BLINKS = 0
     START_TIME = None
+    BLINK_TIMESTAMPS.clear()
+    EYE_CLOSED = False
+    LAST_BLINK_TIME = time.time()
 
-    return jsonify(response_data)
-
-
+    return jsonify({
+        "message": "Deteksi dihentikan. Data sesi berhasil disimpan.",
+        "total_blinks": record.get("blink_count", 0),
+        "duration": duration_sec,
+        "blink_per_minute": record.get("blink_per_minute", 0)
+    })
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5000)
+    # Baris 243 seharusnya ada di sini
+    app.run(debug=True)
