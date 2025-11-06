@@ -9,12 +9,13 @@ import Detect from './pages/Detect';
 import History from './pages/History';
 import Login from './pages/Login';
 import Register from './pages/Register';
+import UpdatePassword from './pages/UpdatePassword';
 
 function AppContent() {
   const location = useLocation();
 
   // daftar halaman yang tidak menampilkan navbar
-  const hideNavbarRoutes = ['/login', '/register'];
+  const hideNavbarRoutes = ['/login', '/register', '/update-password'];
   const shouldHideNavbar = hideNavbarRoutes.includes(location.pathname);
 
   return (
@@ -25,6 +26,7 @@ function AppContent() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
+          <Route path="/update-password" element={<UpdatePassword />} />
           <Route path="/" element={<Home />} />
           <Route path="/detect" element={<Detect />} />
           <Route path="/history" element={<History />} />
