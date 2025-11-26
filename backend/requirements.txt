@@ -1,0 +1,8 @@
+Flask
+Flask-Cors
+opencv-python-headless
+dlib
+numpy
+supabase
+requests
+gunicorn
