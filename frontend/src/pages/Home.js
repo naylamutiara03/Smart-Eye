@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
 import { supabase } from '../supabaseClient';
@@ -24,7 +24,12 @@ function Home() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
+  
+  // State baru untuk menyimpan raw data dan filter
+  const [rawData, setRawData] = useState([]); 
+  const [timeRange, setTimeRange] = useState('7'); // Default 7 hari
   const [refreshing, setRefreshing] = useState(false);
+  
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,58 +45,106 @@ function Home() {
     checkSession();
   }, [navigate]);
 
-  const fetchHistory = async (user) => {
+  // 1. Ambil semua data, tapi simpan ke RawData dulu
+  const fetchHistory = async (currentUser) => {
     setLoading(true);
     setError(null);
     try {
       const response = await axios.get(`${API_URL}/history`, {
-        params: { user_id: user.id },
+        params: { user_id: currentUser.id },
       });
 
-      const records = response.data.reverse();
-
-      if (records.length === 0) {
-        setChartData(null);
-        return;
-      }
-
-      const labels = records.map((r) =>
-        new Date(r.captured_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })
-      );
-      const blinksPerMinute = records.map((r) => r.blink_per_minute || 0);
-
-      setChartData({
-        labels,
-        datasets: [
-          {
-            label: 'Rata-rata Kedipan per Menit',
-            data: blinksPerMinute,
-            fill: true,
-            borderColor: '#0d6efd',
-            backgroundColor: (context) => {
-              const ctx = context.chart.ctx;
-              const gradient = ctx.createLinearGradient(0, 0, 0, 450);
-              gradient.addColorStop(0, 'rgba(13, 110, 253, 0.3)');
-              gradient.addColorStop(1, 'rgba(13, 110, 253, 0)');
-              return gradient;
-            },
-            tension: 0.35,
-            pointBackgroundColor: '#0d6efd',
-            pointBorderColor: '#fff',
-            pointHoverRadius: 6,
-            borderWidth: 3,
-          },
-        ],
-      });
+      // Simpan data mentah (pastikan backend mengirim array obyek lengkap)
+      // Kita reverse di sini agar urutan waktu benar (lama -> baru) sebelum diproses
+      const records = response.data.reverse(); 
+      setRawData(records);
+      
     } catch (err) {
       console.error('Error fetching history:', err);
-      setError('Gagal memuat data history. Pastikan backend Flask berjalan dan user ID valid.');
-      setChartData(null);
+      setError('Gagal memuat data history. Pastikan backend Flask berjalan.');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
   };
+
+  // 2. Logic Pengolahan Data (Dijalankan setiap kali rawData atau timeRange berubah)
+  useEffect(() => {
+    if (rawData.length === 0) {
+      setChartData(null);
+      return;
+    }
+
+    const processData = () => {
+      const now = new Date();
+      // Hitung tanggal batas (cutoff) berdasarkan timeRange
+      const cutoffDate = new Date();
+      cutoffDate.setDate(now.getDate() - parseInt(timeRange));
+
+      // Langkah A: Filter data berdasarkan range tanggal
+      const filteredData = rawData.filter(item => {
+        const itemDate = new Date(item.captured_at);
+        return itemDate >= cutoffDate;
+      });
+
+      if (filteredData.length === 0) {
+        setChartData(null);
+        return;
+      }
+
+      // Langkah B: Grouping by Date (Mengelompokkan data per hari)
+      // Struktur groupedData: { "25/11/2023": [12, 15, 10], "26/11/2023": [20, ...] }
+      const groupedData = {};
+
+      filteredData.forEach(item => {
+        const dateObj = new Date(item.captured_at);
+        // Format tanggal (DD/MM) sebagai label
+        const dateKey = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }); 
+        
+        if (!groupedData[dateKey]) {
+          groupedData[dateKey] = [];
+        }
+        groupedData[dateKey].push(item.blink_per_minute || 0);
+      });
+
+      // Langkah C: Hitung Rata-rata per hari
+      const labels = Object.keys(groupedData);
+      const dataPoints = labels.map(date => {
+        const values = groupedData[date];
+        const sum = values.reduce((a, b) => a + b, 0);
+        return (sum / values.length).toFixed(1); // Ambil 1 desimal
+      });
+
+      // Set Chart Data
+      setChartData({
+        labels,
+        datasets: [
+          {
+            label: `Rata-rata Kedipan (${timeRange} Hari Terakhir)`,
+            data: dataPoints,
+            fill: true,
+            borderColor: '#0d6efd',
+            backgroundColor: (context) => {
+              const ctx = context.chart.ctx;
+              const gradient = ctx.createLinearGradient(0, 0, 0, 450);
+              gradient.addColorStop(0, 'rgba(13, 110, 253, 0.4)');
+              gradient.addColorStop(1, 'rgba(13, 110, 253, 0.05)');
+              return gradient;
+            },
+            tension: 0.4, // Kurva lebih mulus
+            pointBackgroundColor: '#fff',
+            pointBorderColor: '#0d6efd',
+            pointBorderWidth: 2,
+            pointRadius: 4,
+            pointHoverRadius: 7,
+            borderWidth: 3,
+          },
+        ],
+      });
+    };
+
+    processData();
+  }, [rawData, timeRange]); // Re-run logic jika data baru masuk atau filter berubah
 
   const handleRefresh = async () => {
     if (!user) return;
@@ -105,100 +158,92 @@ function Home() {
     plugins: {
       legend: {
         position: 'top',
-        labels: {
-          color: '#333',
-          font: { size: 13, family: 'Poppins, sans-serif' },
-        },
+        labels: { font: { family: 'Poppins' } },
       },
       title: {
-        display: true,
-        text: 'Grafik Rata-rata Kedipan Mata (Blink History)',
-        color: '#212529',
-        font: { size: 16, weight: 'bold', family: 'Poppins, sans-serif' },
-        padding: { bottom: 20 },
+        display: false, // Title dipindah ke header card
       },
+      tooltip: {
+        backgroundColor: 'rgba(255, 255, 255, 0.9)',
+        titleColor: '#000',
+        bodyColor: '#666',
+        borderColor: '#ddd',
+        borderWidth: 1,
+        padding: 10,
+        callbacks: {
+            label: function(context) {
+                return `Rata-rata: ${context.parsed.y} kedipan/menit`;
+            }
+        }
+      }
     },
     scales: {
       y: {
         beginAtZero: true,
-        title: {
-          display: true,
-          text: 'Kedipan per Menit',
-          color: '#495057',
-          font: { size: 12, weight: '600' },
-        },
-        grid: { color: 'rgba(0,0,0,0.05)' },
+        grid: { borderDash: [5, 5] },
+        title: { display: true, text: 'Rata-rata Kedipan' }
       },
       x: {
-        title: {
-          display: true,
-          text: 'Waktu Sesi',
-          color: '#495057',
-          font: { size: 12, weight: '600' },
-        },
-        grid: { color: 'rgba(0,0,0,0.05)' },
+        grid: { display: false },
+        title: { display: true, text: 'Tanggal' }
       },
     },
   };
 
   return (
-    <div className="container mt-5">
-      <div className="text-center p-3 mb-4">
-        <h2 className="fw-bold text-primary mb-1">Selamat Datang di EyeCare</h2>
-        {user && (
-          <p className="text-muted mb-4">
-            Login sebagai: <span className="fw-semibold">{user.email}</span>
-          </p>
-        )}
-        <p className="lead text-secondary">
-          Aplikasi untuk memantau kesehatan mata Anda saat di depan layar.
-        </p>
+    <div className="container mt-5 mb-5">
+      <div className="text-center mb-4">
+        <h2 className="fw-bold text-primary">Dashboard EyeCare</h2>
+        <p className="text-muted">Pantau kebiasaan dan kesehatan mata Anda.</p>
       </div>
 
-      {/* CARD GRAFIK */}
-      <div
-        className="card shadow-lg border-0 rounded-4 mx-auto"
-        style={{
-          maxWidth: '1100px',
-          background: 'linear-gradient(to bottom right, #ffffff, #f8f9fa)',
-        }}
-      >
-        <div className="card-header d-flex justify-content-between align-items-center bg-transparent border-0 px-4 pt-4 pb-2">
-          <h5 className="mb-0 fw-bold text-secondary">Riwayat Kedipan Mata Anda</h5>
-          <button
-            className="btn btn-outline-primary btn-sm d-flex align-items-center"
-            onClick={handleRefresh}
-            disabled={refreshing}
-          >
-            {refreshing ? (
-              <>
-                <div className="spinner-border spinner-border-sm me-2" role="status" />
-                Memuat...
-              </>
-            ) : (
-              <>
-                🔄 <span className="ms-1">Refresh</span>
-              </>
-            )}
-          </button>
+      <div className="card shadow-lg border-0 rounded-4 mx-auto" style={{ maxWidth: '1000px' }}>
+        {/* HEADER CARD: Judul & Kontrol Filter */}
+        <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <h5 className="mb-1 fw-bold text-dark">Analisis Kebiasaan</h5>
+                <small className="text-muted">Grafik rata-rata harian</small>
+            </div>
+
+            <div className="d-flex gap-2">
+                {/* DROPDOWN FILTER HARI */}
+                <select 
+                    className="form-select form-select-sm shadow-none border-secondary-subtle" 
+                    style={{ width: '150px', borderRadius: '8px' }}
+                    value={timeRange}
+                    onChange={(e) => setTimeRange(e.target.value)}
+                >
+                    <option value="7">7 Hari Terakhir</option>
+                    <option value="14">14 Hari Terakhir</option>
+                    <option value="30">30 Hari Terakhir</option>
+                    <option value="90">3 Bulan (Trend)</option>
+                </select>
+
+                <button
+                    className="btn btn-primary btn-sm rounded-3 px-3"
+                    onClick={handleRefresh}
+                    disabled={refreshing}
+                >
+                    {refreshing ? 'Loading...' : 'Refresh'}
+                </button>
+            </div>
         </div>
 
-        <div className="card-body p-4" style={{ height: '400px' }}>
+        <div className="card-body p-4" style={{ height: '450px' }}>
           {loading ? (
-            <div className="d-flex justify-content-center align-items-center h-100">
-              <div className="spinner-border text-primary me-2" role="status" />
-              <p className="mb-0">Memuat data grafik...</p>
+            <div className="d-flex flex-column justify-content-center align-items-center h-100">
+              <div className="spinner-border text-primary mb-3" role="status" />
+              <p className="text-muted">Mengambil data...</p>
             </div>
           ) : error ? (
-            <div className="alert alert-danger text-center">{error}</div>
-          ) : chartData && chartData.labels.length > 0 ? (
-            <div style={{ width: '100%', height: '100%' }}>
-              <Line data={chartData} options={options} />
-            </div>
+            <div className="alert alert-danger">{error}</div>
+          ) : chartData ? (
+            <Line data={chartData} options={options} />
           ) : (
-            <p className="text-muted text-center mt-4">
-              Belum ada history deteksi untuk ditampilkan. Silakan mulai deteksi terlebih dahulu!
-            </p>
+            <div className="d-flex flex-column justify-content-center align-items-center h-100 text-muted">
+               <i className="bi bi-bar-chart fs-1 mb-2 opacity-25"></i>
+               <p>Tidak ada data pada rentang waktu ini.</p>
+            </div>
           )}
         </div>
       </div>

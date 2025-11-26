@@ -1,5 +1,3 @@
-// App.js
-
 // frontend/src/App.js
 import React from 'react';
 import { BrowserRouter as Router, Route, Routes, useLocation } from 'react-router-dom';
@@ -20,8 +18,17 @@ function AppContent() {
 
   return (
     <>
-      {!shouldHideNavbar && <Navbar />}
+      {!shouldHideNavbar && (
+        // --- MODIFIKASI DI SINI ---
+        // Kita bungkus Navbar dengan div sticky agar menempel di atas
+        <div style={{ position: 'sticky', top: 0, zIndex: 1000, width: '100%' }}>
+          <Navbar />
+        </div>
+      )}
 
+      {/* Catatan: Karena Navbar sekarang sticky, pastikan konten main 
+        memiliki margin yang cukup agar rapi. class 'mt-4' sudah cukup baik.
+      */}
       <main className={`${shouldHideNavbar ? '' : 'container mt-4'}`}>
         <Routes>
           <Route path="/login" element={<Login />} />
