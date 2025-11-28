@@ -40,6 +40,67 @@ const RateIcon = (props) => (
   </svg>
 );
 
+// --- KOMPONEN BARU: MODE TOGGLE SWITCH ---
+const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
+  const isStrict = detectionMode === 'strict';
+  const color = isStrict ? '#ef4444' : '#10b981'; // Merah untuk Strict, Hijau untuk Fokus
+
+  const toggleStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0.75rem 1rem',
+    borderRadius: '0.5rem',
+    backgroundColor: '#fff',
+    border: '1px solid #e5e7eb',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
+    marginTop: '1.5rem',
+    marginBottom: '1rem',
+    opacity: isDetecting ? 0.6 : 1, // Kurangi opacity jika sedang mendeteksi (agar tidak bisa diubah)
+    pointerEvents: isDetecting ? 'none' : 'auto',
+  };
+
+  const switchContainerStyle = {
+    width: '50px',
+    height: '28px',
+    backgroundColor: isStrict ? color : '#d1d5db',
+    borderRadius: '14px',
+    padding: '2px',
+    cursor: 'pointer',
+    transition: 'background-color 0.2s',
+    position: 'relative',
+    marginLeft: '1rem',
+  };
+
+  const switchButtonStyle = {
+    width: '24px',
+    height: '24px',
+    backgroundColor: 'white',
+    borderRadius: '50%',
+    transition: 'transform 0.2s',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+    transform: isStrict ? 'translateX(22px)' : 'translateX(0)',
+  };
+
+  return (
+    <div style={toggleStyle}>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <span style={{ fontWeight: '700', color: isStrict ? color : '#1f2937' }}>
+          Mode Deteksi: {isStrict ? 'Strict' : 'Fokus'}
+        </span>
+        <span style={{ fontSize: '0.75rem', color: '#6b7280', marginTop: '0.25rem' }}>
+          {isStrict ? 'Peringatan lebih sensitif dan sering.' : 'Peringatan standar, cocok untuk pekerjaan umum.'}
+        </span>
+      </div>
+      
+      <div style={switchContainerStyle} onClick={() => setDetectionMode(isStrict ? 'focus' : 'strict')}>
+        <div style={switchButtonStyle} />
+      </div>
+    </div>
+  );
+};
+// ---------------------------------------------
+
 
 function Detect() {
   const [isDetecting, setIsDetecting] = useState(false);
@@ -49,7 +110,9 @@ function Detect() {
   const [startTime, setStartTime] = useState(null);
   const [showHistoryButton, setShowHistoryButton] = useState(false);
   
-  // --- STATE BARU UNTUK RESPONSIVITAS ---
+  // --- STATE BARU: Detection Mode ('focus' atau 'strict') ---
+  const [detectionMode, setDetectionMode] = useState('focus'); 
+  
   const [isMobileView, setIsMobileView] = useState(window.innerWidth <= 768);
 
   const videoRef = useRef(null);
@@ -61,23 +124,20 @@ function Detect() {
 
   // --- EFFECT UNTUK HANDLE RESIZE DAN CLEANUP ---
   useEffect(() => {
-    // Logic untuk responsivitas
     const handleResize = () => {
       setIsMobileView(window.innerWidth <= 768);
     };
 
     window.addEventListener('resize', handleResize);
-    handleResize(); // Panggil saat mount
+    handleResize(); 
 
-    // Request permission notifikasi
     if (Notification && Notification.permission !== "granted") {
       Notification.requestPermission().catch(() => { });
     }
     
-    // Cleanup: Hapus event listener dan hentikan deteksi saat komponen di-unmount
     return () => {
       window.removeEventListener('resize', handleResize);
-      stopDetection(false); // cleanup
+      stopDetection(false); 
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -138,10 +198,16 @@ function Detect() {
 
         try {
           let res;
+          // Payload sekarang menyertakan mode
+          const payload = { 
+            image: frame, 
+            mode: detectionMode // <-- Kirim mode deteksi ke backend 
+          };
+
           // Retry 3x dengan exponential backoff
           for (let i = 0; i < 3; i++) {
             try {
-              res = await axios.post(`${API_URL}/process_frame`, { image: frame }, { timeout: 5000 });
+              res = await axios.post(`${API_URL}/process_frame`, payload, { timeout: 5000 });
               break;
             } catch (err) {
               if (i < 2) {
@@ -215,16 +281,18 @@ function Detect() {
       start_time: startTime,
       end_time: new Date().toISOString(),
       user_id: userId,
-      device_id: null
+      device_id: null,
+      detection_mode: detectionMode, // <-- Simpan mode ke riwayat
     };
 
     setStats({ total_blinks: 0, blink_rate: 0 });
 
     if (saveRecord && payload.user_id) {
       try {
+        // Asumsi backend /stop_detection juga menerima mode
         const res = await axios.post(`${API_URL}/stop_detection`, payload, { timeout: 8000 });
 
-        const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks ?? payload.total_blinks} (durasi ${res.data.duration ?? '?'} detik)`;
+        const successMessage = `✅ Sesi (${detectionMode.toUpperCase()}) selesai! Total Kedipan: ${res.data.total_blinks ?? payload.total_blinks} (durasi ${res.data.duration ?? '?'} detik)`;
 
         const historyButtonHtml = `
           <a href="/history?user_id=${userId}" 
@@ -279,7 +347,7 @@ function Detect() {
   // LOGIC RESPONSIVITAS DI SINI:
   const contentWrapperStyle = {
     display: 'flex',
-    flexDirection: isMobileView ? 'column' : 'row', // Responsif: column di mobile, row di desktop
+    flexDirection: isMobileView ? 'column' : 'row', 
     gap: '1.5rem',
     maxWidth: '1000px',
     width: '100%',
@@ -289,17 +357,15 @@ function Detect() {
     backgroundColor: 'white',
     padding: '1.5rem',
     borderRadius: '1rem',
-    boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
+    boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
     transition: 'box-shadow 0.3s ease',
   };
   
-  // Flex: 3 untuk Kamera (Desktop), Flex 1 (Mobile)
   const leftPanelStyle = { 
       ...cardBaseStyle, 
       flex: isMobileView ? '1' : '3' 
   };
   
-  // Flex: 2 untuk Statistik (Desktop), Flex 1 (Mobile)
   const rightPanelStyle = { 
       ...cardBaseStyle, 
       flex: isMobileView ? '1' : '2', 
@@ -310,7 +376,6 @@ function Detect() {
   
   const statsGridStyle = { 
       display: 'grid', 
-      // Grid 2 kolom di semua ukuran
       gridTemplateColumns: 'repeat(2, 1fr)', 
       gap: '1rem', 
       marginTop: '1rem' 
@@ -327,7 +392,6 @@ function Detect() {
   const videoStyle = { 
       width: '100%', 
       height: 'auto', 
-      // Penting: jaga rasio aspek agar tidak melar di mobile
       aspectRatio: '4 / 3', 
       objectFit: 'cover', 
       transform: 'scaleX(-1)', 
@@ -372,7 +436,6 @@ function Detect() {
       <div className="container mb-5">
         <div style={mainContainerStyle}>
           <div className="flex flex-col items-center w-full">
-            {/* Menggunakan contentWrapperStyle yang responsif */}
             <div style={contentWrapperStyle}>
               
               {/* Panel Kiri: Kamera & Kontrol */}
@@ -459,12 +522,20 @@ function Detect() {
               {/* Panel Kanan: Statistik Real-time */}
               <div style={rightPanelStyle}>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #bfdbfe', paddingBottom: '0.5rem' }}>
-                  Statistik Real time
+                  Statistik Real-time
                 </h2>
 
-                <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+                <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
                   Status deteksi: {isDetecting ? <span style={{ color: '#10b981', fontWeight: 'bold' }}>AKTIF</span> : <span style={{ color: '#f97316', fontWeight: 'bold' }}>TIDAK AKTIF</span>}
                 </p>
+                
+                {/* --- KOMPONEN MODE TOGGLE BARU DI SINI --- */}
+                <ModeToggle 
+                    detectionMode={detectionMode} 
+                    setDetectionMode={setDetectionMode}
+                    isDetecting={isDetecting}
+                />
+                {/* ------------------------------------------- */}
 
                 <div style={statsGridStyle}>
                   <div style={statItemStyle}>

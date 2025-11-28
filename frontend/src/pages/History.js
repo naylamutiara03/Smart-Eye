@@ -1,5 +1,4 @@
 // frontend/src/pages/History.js
-// frontend/src/pages/History.js
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 // Tambahkan import supabaseClient dan useNavigate untuk mendapatkan user
@@ -46,9 +45,7 @@ function History() {
     fetchHistory();
   }, [navigate]); // Tambahkan navigate sebagai dependency
 
-  if (loading) return <p>Memuat history...</p>;
-  // ... (rest of the return statement is the same)
-  // ...
+  if (loading) return <p className="text-center mt-5">Memuat history...</p>;
 
   return (
     <div className="page-content">
@@ -64,11 +61,14 @@ function History() {
                   <th>Waktu Terekam</th>
                   <th>Total Kedipan</th>
                   <th>Durasi (detik)</th>
+                  {/* === MODIFIKASI: TAMBAH KOLOM MODE === */}
+                  <th>Mode</th> 
+                  {/* ================================== */}
                 </tr>
               </thead>
               <tbody>
                 {records.map((r, index) => (
-                  <tr key={r.id || index}>
+                  <tr key={r.id || index} className={r.warning_triggered ? 'table-warning' : ''}>
                     <td>{index + 1}</td>
                     <td>
                       {r.captured_at
@@ -77,6 +77,9 @@ function History() {
                     </td>
                     <td>{r.blink_count}</td>
                     <td>{r.stare_duration_sec}</td>
+                    {/* === MODIFIKASI: TAMPILKAN MODE === */}
+                    <td>{r.detection_mode ? r.detection_mode.toUpperCase() : 'FOCUS'}</td>
+                    {/* ================================== */}
                   </tr>
                 ))}
               </tbody>
