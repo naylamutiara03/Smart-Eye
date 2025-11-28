@@ -19,17 +19,18 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, T
 
 const API_URL = 'http://127.0.0.1:5000';
 
+
 function Home() {
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [error, setError] = useState(null);
-  
+
   // State baru untuk menyimpan raw data dan filter
-  const [rawData, setRawData] = useState([]); 
+  const [rawData, setRawData] = useState([]);
   const [timeRange, setTimeRange] = useState('7'); // Default 7 hari
   const [refreshing, setRefreshing] = useState(false);
-  
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -56,9 +57,9 @@ function Home() {
 
       // Simpan data mentah (pastikan backend mengirim array obyek lengkap)
       // Kita reverse di sini agar urutan waktu benar (lama -> baru) sebelum diproses
-      const records = response.data.reverse(); 
+      const records = response.data.reverse();
       setRawData(records);
-      
+
     } catch (err) {
       console.error('Error fetching history:', err);
       setError('Gagal memuat data history. Pastikan backend Flask berjalan.');
@@ -99,8 +100,8 @@ function Home() {
       filteredData.forEach(item => {
         const dateObj = new Date(item.captured_at);
         // Format tanggal (DD/MM) sebagai label
-        const dateKey = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }); 
-        
+        const dateKey = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+
         if (!groupedData[dateKey]) {
           groupedData[dateKey] = [];
         }
@@ -171,9 +172,9 @@ function Home() {
         borderWidth: 1,
         padding: 10,
         callbacks: {
-            label: function(context) {
-                return `Rata-rata: ${context.parsed.y} kedipan/menit`;
-            }
+          label: function (context) {
+            return `Rata-rata: ${context.parsed.y} kedipan/menit`;
+          }
         }
       }
     },
@@ -191,63 +192,68 @@ function Home() {
   };
 
   return (
-    <div className="container mt-5 mb-5">
-      <div className="text-center mb-4">
-        <h2 className="fw-bold text-primary">Dashboard EyeCare</h2>
-        <p className="text-muted">Pantau kebiasaan dan kesehatan mata Anda.</p>
-      </div>
+    <div className="page-content">
+      <div className="container mb-5">
+        <div className="container mt-5 mb-5">
+          <div className="text-center mb-4">
+            <h2 className="fw-bold text-primary">Dashboard EyeCare</h2>
+            <p className="text-muted">Pantau kebiasaan dan kesehatan mata Anda.</p>
+          </div>
 
-      <div className="card shadow-lg border-0 rounded-4 mx-auto" style={{ maxWidth: '1000px' }}>
-        {/* HEADER CARD: Judul & Kontrol Filter */}
-        <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-            <div>
+          <div className="card shadow-lg border-0 rounded-4 mx-auto" style={{ maxWidth: '1000px' }}>
+            {/* HEADER CARD: Judul & Kontrol Filter */}
+            <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
+              <div>
                 <h5 className="mb-1 fw-bold text-dark">Analisis Kebiasaan</h5>
                 <small className="text-muted">Grafik rata-rata harian</small>
-            </div>
+              </div>
 
-            <div className="d-flex gap-2">
+              <div className="d-flex gap-2">
                 {/* DROPDOWN FILTER HARI */}
-                <select 
-                    className="form-select form-select-sm shadow-none border-secondary-subtle" 
-                    style={{ width: '150px', borderRadius: '8px' }}
-                    value={timeRange}
-                    onChange={(e) => setTimeRange(e.target.value)}
+                <select
+                  className="form-select form-select-sm shadow-none border-secondary-subtle"
+                  style={{ width: '150px', borderRadius: '8px' }}
+                  value={timeRange}
+                  onChange={(e) => setTimeRange(e.target.value)}
                 >
-                    <option value="7">7 Hari Terakhir</option>
-                    <option value="14">14 Hari Terakhir</option>
-                    <option value="30">30 Hari Terakhir</option>
-                    <option value="90">3 Bulan (Trend)</option>
+                  <option value="7">7 Hari Terakhir</option>
+                  <option value="14">14 Hari Terakhir</option>
+                  <option value="30">30 Hari Terakhir</option>
+                  <option value="90">3 Bulan (Trend)</option>
                 </select>
 
                 <button
-                    className="btn btn-primary btn-sm rounded-3 px-3"
-                    onClick={handleRefresh}
-                    disabled={refreshing}
+                  className="btn btn-primary btn-sm rounded-3 px-3"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
                 >
-                    {refreshing ? 'Loading...' : 'Refresh'}
+                  {refreshing ? 'Loading...' : 'Refresh'}
                 </button>
+              </div>
             </div>
-        </div>
 
-        <div className="card-body p-4" style={{ height: '450px' }}>
-          {loading ? (
-            <div className="d-flex flex-column justify-content-center align-items-center h-100">
-              <div className="spinner-border text-primary mb-3" role="status" />
-              <p className="text-muted">Mengambil data...</p>
+            <div className="card-body p-4" style={{ height: '450px' }}>
+              {loading ? (
+                <div className="d-flex flex-column justify-content-center align-items-center h-100">
+                  <div className="spinner-border text-primary mb-3" role="status" />
+                  <p className="text-muted">Mengambil data...</p>
+                </div>
+              ) : error ? (
+                <div className="alert alert-danger">{error}</div>
+              ) : chartData ? (
+                <Line data={chartData} options={options} />
+              ) : (
+                <div className="d-flex flex-column justify-content-center align-items-center h-100 text-muted">
+                  <i className="bi bi-bar-chart fs-1 mb-2 opacity-25"></i>
+                  <p>Tidak ada data pada rentang waktu ini.</p>
+                </div>
+              )}
             </div>
-          ) : error ? (
-            <div className="alert alert-danger">{error}</div>
-          ) : chartData ? (
-            <Line data={chartData} options={options} />
-          ) : (
-            <div className="d-flex flex-column justify-content-center align-items-center h-100 text-muted">
-               <i className="bi bi-bar-chart fs-1 mb-2 opacity-25"></i>
-               <p>Tidak ada data pada rentang waktu ini.</p>
-            </div>
-          )}
+          </div>
         </div>
       </div>
     </div>
+
   );
 }
 

@@ -1,3 +1,8 @@
+/* Hindari konten tertutup navbar */
+body, #root {
+  padding-top: 85px; /* aman untuk navbar height + shadow/padding */
+}
+
 .App {
   text-align: center;
 }

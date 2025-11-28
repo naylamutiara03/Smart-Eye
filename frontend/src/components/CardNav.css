@@ -1,0 +1,227 @@
+/* CardNav.css */
+
+.card-nav-container {
+  position: fixed;
+  top: 0;
+  left: 0;
+  transform: none;
+  width: 100%;
+  max-width: none;
+  z-index: 1000;
+  box-sizing: border-box;
+  padding: 0.5rem 1rem;
+}
+
+.card-nav {
+  display: block;
+  height: 55px;
+  padding: 0;
+  /* LATAR BELAKANG NAV BAR (Biru Tua) */
+  background-color: #2a52be;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 0.75rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
+  position: relative;
+  overflow: hidden;
+  will-change: height;
+  
+  /* MODIFIKASI: Tetapkan warna teks default menjadi putih untuk elemen di dalamnya */
+  color: white; 
+}
+
+.card-nav-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 55px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 1.2rem;
+  z-index: 2;
+  
+  /* Opsional: Jika Anda ingin Logo tidak terpengaruh, beri warna spesifik di logo-container */
+}
+
+/* --- Ikon Hamburger (akan mengikuti color: white dari .card-nav) --- */
+.hamburger-menu {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  gap: 6px;
+  margin-left: 0;
+}
+
+.hamburger-menu:hover .hamburger-line {
+  opacity: 0.75;
+}
+
+.hamburger-line {
+  width: 28px;
+  height: 2px;
+  background-color: currentColor; /* Sekarang akan menjadi putih */
+  transition: transform 0.25s ease, opacity 0.2s ease, margin 0.3s ease;
+  transform-origin: 50% 50%;
+}
+
+.hamburger-menu.open .hamburger-line:first-child {
+  transform: translateY(4px) rotate(45deg);
+}
+
+.hamburger-menu.open .hamburger-line:last-child {
+  transform: translateY(-4px) rotate(-45deg);
+}
+
+.logo-container {
+  display: flex;
+  align-items: center;
+  position: static;
+  transform: none;
+  padding-left: 0.5rem;
+  margin-right: 0;
+}
+
+.logo {
+  height: 28px;
+  /* CATATAN: Jika logo adalah SVG/teks, ini akan menjadi putih. 
+     Jika ini adalah gambar PNG, pastikan desain logonya cocok dengan latar belakang gelap. */
+}
+
+.card-nav-cta-button {
+  display: none;
+}
+
+.card-nav-cta-button:hover {
+  background-color: #c82333;
+}
+
+.card-nav-content {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 55px;
+  bottom: 0;
+  padding: 0.5rem;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  visibility: hidden;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.card-nav.open .card-nav-content {
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* --- CARD NAVIGASI (ISI KONTEN) --- */
+.nav-card.navlink-card {
+  height: 100%;
+  flex: 1 1 0;
+  min-width: 0;
+  border-radius: 0.6rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 16px;
+  gap: 8px;
+  user-select: none;
+  cursor: pointer;
+  text-decoration: none;
+  justify-content: center;
+  align-items: center;
+  transition: all 0.2s ease, background-color 0.2s; /* Tambahkan background-color ke transisi */
+  
+  /* MODIFIKASI: Atur warna latar belakang default card menjadi putih 
+     (karena .card-nav-content tidak memiliki latar belakang yang jelas) */
+  background-color: white; 
+  /* Teks di dalam card kembali ke warna gelap agar terbaca */
+  color: #333; 
+}
+
+/* MODIFIKASI: Efek HOVER untuk Card Navigasi */
+.nav-card.navlink-card:hover {
+    background-color: #f0f8ff; /* Warna biru sangat muda saat di-hover */
+    transform: translateY(-1px); /* Efek mengangkat sedikit */
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.nav-card-label {
+  font-weight: 500;
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.nav-card-links {
+  display: none;
+}
+
+.navlink-card.active {
+  box-shadow: 0 0 0 2px #00BCD4 inset;
+  opacity: 1 !important;
+}
+
+@media (max-width: 768px) {
+  /* ... (Mobile styles) ... */
+  .card-nav-container {
+    width: 100%;
+    padding: 0.5rem 0.5rem;
+  }
+
+  .card-nav-top {
+    justify-content: space-between;
+    padding: 0 1rem;
+  }
+
+  .hamburger-menu {
+    order: 2;
+    margin-left: 0;
+  }
+
+  .logo-container {
+    order: 1;
+    margin-right: 0;
+  }
+
+  .card-nav-cta-button {
+    display: none;
+  }
+
+  .card-nav-content {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 0.5rem;
+    bottom: 0;
+    justify-content: flex-start;
+  }
+
+  .nav-card.navlink-card {
+    height: auto;
+    min-height: 50px;
+    flex: 1 1 auto;
+    max-height: none;
+    padding: 10px 16px;
+    align-items: flex-start;
+  }
+  
+  /* Pastikan hover juga bekerja di mobile (untuk touch devices) */
+  .nav-card.navlink-card:hover {
+      background-color: #f0f8ff; 
+      transform: none;
+      box-shadow: none;
+  }
+
+  .nav-card-label {
+    font-size: 16px;
+  }
+}
+
+.page-content {
+  margin-top: 85px;
+}

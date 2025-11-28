@@ -1,13 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import axios from 'axios';
-// IMPORT PENTING: Untuk mendapatkan sesi pengguna yang sedang login
-import { supabase } from '../supabaseClient'; 
+import { supabase } from '../supabaseClient';
 
 // Konfigurasi API
 const API_URL = 'http://127.0.0.1:5000';
 
 // Ikon menggunakan inline SVG (PlayIcon, StopIcon, CameraIcon, BlinksIcon, RateIcon)
-// Dibiarkan sama seperti kode asli Anda
 const PlayIcon = (props) => (
   <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <polygon points="5 3 19 12 5 21 5 3"></polygon>
@@ -46,10 +44,13 @@ const RateIcon = (props) => (
 function Detect() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [stats, setStats] = useState({ total_blinks: 0, blink_rate: 0 });
-  const [warning, setWarning] = useState(''); // dapat berisi HTML (dengan tombol)
-  const [warningText, setWarningText] = useState(''); // teks ringkas
+  const [warning, setWarning] = useState('');
+  const [warningText, setWarningText] = useState('');
   const [startTime, setStartTime] = useState(null);
   const [showHistoryButton, setShowHistoryButton] = useState(false);
+  
+  // --- STATE BARU UNTUK RESPONSIVITAS ---
+  const [isMobileView, setIsMobileView] = useState(window.innerWidth <= 768);
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -58,22 +59,35 @@ function Detect() {
   // Audio untuk notifikasi
   const beep = useRef(new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg"));
 
-  // Request permission notifikasi
+  // --- EFFECT UNTUK HANDLE RESIZE DAN CLEANUP ---
   useEffect(() => {
+    // Logic untuk responsivitas
+    const handleResize = () => {
+      setIsMobileView(window.innerWidth <= 768);
+    };
+
+    window.addEventListener('resize', handleResize);
+    handleResize(); // Panggil saat mount
+
+    // Request permission notifikasi
     if (Notification && Notification.permission !== "granted") {
-      Notification.requestPermission().catch(() => {});
+      Notification.requestPermission().catch(() => { });
     }
+    
+    // Cleanup: Hapus event listener dan hentikan deteksi saat komponen di-unmount
     return () => {
+      window.removeEventListener('resize', handleResize);
       stopDetection(false); // cleanup
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // ---------------------------------------------
+
 
   const showNotification = (text) => {
     try {
       if (!("Notification" in window)) return;
       if (Notification.permission === "granted") {
-        // Hanya tampilkan notifikasi jika tab tidak aktif/tersembunyi
         if (!document.hidden) return;
         new Notification("EyeCare Alert", {
           body: text,
@@ -102,18 +116,17 @@ function Detect() {
         setWarning("❌ Tidak bisa memulai deteksi. Elemen video belum siap.");
         return;
       }
-      
-      // Cek apakah user sudah login sebelum memulai deteksi
+
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) {
-          setWarning("Anda harus login untuk memulai deteksi.");
-          return;
+        setWarning("Anda harus login untuk memulai deteksi.");
+        return;
       }
-      
+
       const stream = await navigator.mediaDevices.getUserMedia({ video: true });
       videoRef.current.srcObject = stream;
       streamRef.current = stream;
-      setStartTime(new Date().toISOString()); 
+      setStartTime(new Date().toISOString());
       setIsDetecting(true);
       setWarning('');
       setWarningText('');
@@ -150,14 +163,11 @@ function Detect() {
           const msg = res.data.message || '';
           if (msg.includes("⚠️")) {
             setWarning(msg);
-            // play beep (ignore failure)
-            beep.current && beep.current.play().catch(() => {});
+            beep.current && beep.current.play().catch(() => { });
             showNotification(msg);
           } else if (msg.includes("✅")) {
-            // session finished message — biarkan diproses saat stop
-            // tidak overwrite warningText jika sudah ada sesi selesai
+            // Biarkan diproses saat stop
           } else {
-            // jika tidak ada peringatan aktif, clear warning kecuali sudah ada warningText success
             if (!warningText.startsWith('✅')) {
               setWarning('');
             }
@@ -165,7 +175,6 @@ function Detect() {
         } catch (err) {
           console.error("Error processing frame:", err);
           setWarning("Gagal memproses frame atau koneksi terputus.");
-          // dalam kasus kegagalan persistent, hentikan deteksi namun tanpa menyimpan
           stopDetection(false);
         }
       }, 300);
@@ -189,53 +198,51 @@ function Detect() {
       streamRef.current = null;
     }
     setIsDetecting(false);
-    
-    // 1. Dapatkan user ID dari Supabase
+
     let userId = null;
     try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session) {
-            userId = session.user.id;
-        }
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) {
+        userId = session.user.id;
+      }
     } catch (e) {
-        console.error("Gagal mendapatkan sesi Supabase:", e);
+      console.error("Gagal mendapatkan sesi Supabase:", e);
     }
-    
 
-    // Capture current stats snapshot before reset (so we send last known)
     const payload = {
       total_blinks: stats.total_blinks,
       blink_rate: stats.blink_rate,
       start_time: startTime,
-      end_time: new Date().toISOString(), // Tambahkan end_time untuk backend
+      end_time: new Date().toISOString(),
       user_id: userId,
       device_id: null
     };
 
-    // Reset stats displayed to avoid stale UI if user re-starts
     setStats({ total_blinks: 0, blink_rate: 0 });
 
-    if (saveRecord && payload.user_id) { // Pastikan ada user_id untuk menyimpan
+    if (saveRecord && payload.user_id) {
       try {
-        // Kirim payload dengan user_id
         const res = await axios.post(`${API_URL}/stop_detection`, payload, { timeout: 8000 });
 
-        // success message + tombol riwayat (HTML)
         const successMessage = `✅ Sesi selesai! Total Kedipan: ${res.data.total_blinks ?? payload.total_blinks} (durasi ${res.data.duration ?? '?'} detik)`;
 
         const historyButtonHtml = `
-  <a href="/history" 
-    // Ganti menjadi link dengan user_id di query parameter (jika Anda menggunakan React Router)
-    href="/history?user_id=${userId}" 
-    style="
-      /* ... styles */
-    ">
-    Lihat Riwayat
-  </a>
-`;
+          <a href="/history?user_id=${userId}" 
+            style="
+              background-color: #10b981; 
+              color: white; 
+              padding: 0.25rem 0.75rem; 
+              border-radius: 0.375rem; 
+              text-decoration: none; 
+              font-weight: 600; 
+              margin-left: 1rem;
+              display: inline-block;
+            ">
+            Lihat Riwayat
+          </a>
+        `;
 
-        // set warning (HTML) dan warningText (plain)
-        setWarning(`${successMessage}. ${historyButtonHtml}`);
+        setWarning(`${successMessage}${historyButtonHtml}`);
         setWarningText(successMessage);
         setShowHistoryButton(true);
 
@@ -245,18 +252,17 @@ function Detect() {
         setWarning(`Error saat menghentikan sesi: ${err?.message || err}. Data mungkin tidak tersimpan.`);
       }
     } else {
-      // tidak menyimpan, hanya clear warning
       setWarning('');
       setWarningText('');
       setShowHistoryButton(false);
-      
-      if(saveRecord && !payload.user_id) {
-          setWarning("❌ Gagal menyimpan riwayat. Anda tidak terautentikasi.");
+
+      if (saveRecord && !payload.user_id) {
+        setWarning("❌ Gagal menyimpan riwayat. Anda tidak terautentikasi.");
       }
     }
   };
 
-  // --- Styles (sama seperti sebelumnya) ---
+  // --- Styles (diperbarui untuk menggunakan isMobileView) ---
   const primaryColor = '#3b82f6';
   const secondaryBg = '#e0f2fe';
   const mainContainerStyle = {
@@ -269,13 +275,16 @@ function Detect() {
     justifyContent: 'center',
     alignItems: 'flex-start',
   };
+  
+  // LOGIC RESPONSIVITAS DI SINI:
   const contentWrapperStyle = {
     display: 'flex',
-    flexDirection: window.innerWidth > 768 ? 'row' : 'column',
+    flexDirection: isMobileView ? 'column' : 'row', // Responsif: column di mobile, row di desktop
     gap: '1.5rem',
     maxWidth: '1000px',
     width: '100%',
   };
+  
   const cardBaseStyle = {
     backgroundColor: 'white',
     padding: '1.5rem',
@@ -283,131 +292,208 @@ function Detect() {
     boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)',
     transition: 'box-shadow 0.3s ease',
   };
-  const leftPanelStyle = { ...cardBaseStyle, flex: window.innerWidth > 768 ? '3' : '1' };
-  const rightPanelStyle = { ...cardBaseStyle, flex: window.innerWidth > 768 ? '2' : '1', backgroundColor: secondaryBg, display: 'flex', flexDirection: 'column' };
-  const statsGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginTop: '1rem' };
-  const statItemStyle = { padding: '1rem', backgroundColor: 'white', borderRadius: '0.75rem', textAlign: 'center', boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' };
-  const videoStyle = { width: '100%', height: 'auto', aspectRatio: '4 / 3', objectFit: 'cover', transform: 'scaleX(-1)', borderRadius: '0.75rem', backgroundColor: '#374151' };
-  const videoPlaceholderStyle = { ...videoStyle, aspectRatio: '4 / 3', border: '2px dashed #9ca3af', backgroundColor: '#f3f4f6', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center', transform: 'none' };
-  const buttonBaseStyle = { padding: '0.75rem 1.25rem', fontWeight: '600', borderRadius: '0.5rem', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', border: 'none', transition: 'background-color 0.3s, transform 0.1s, box-shadow 0.3s', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' };
+  
+  // Flex: 3 untuk Kamera (Desktop), Flex 1 (Mobile)
+  const leftPanelStyle = { 
+      ...cardBaseStyle, 
+      flex: isMobileView ? '1' : '3' 
+  };
+  
+  // Flex: 2 untuk Statistik (Desktop), Flex 1 (Mobile)
+  const rightPanelStyle = { 
+      ...cardBaseStyle, 
+      flex: isMobileView ? '1' : '2', 
+      backgroundColor: secondaryBg, 
+      display: 'flex', 
+      flexDirection: 'column' 
+  };
+  
+  const statsGridStyle = { 
+      display: 'grid', 
+      // Grid 2 kolom di semua ukuran
+      gridTemplateColumns: 'repeat(2, 1fr)', 
+      gap: '1rem', 
+      marginTop: '1rem' 
+  };
+  
+  const statItemStyle = { 
+      padding: '1rem', 
+      backgroundColor: 'white', 
+      borderRadius: '0.75rem', 
+      textAlign: 'center', 
+      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' 
+  };
+  
+  const videoStyle = { 
+      width: '100%', 
+      height: 'auto', 
+      // Penting: jaga rasio aspek agar tidak melar di mobile
+      aspectRatio: '4 / 3', 
+      objectFit: 'cover', 
+      transform: 'scaleX(-1)', 
+      borderRadius: '0.75rem', 
+      backgroundColor: '#374151' 
+  };
+  
+  const videoPlaceholderStyle = { 
+      ...videoStyle, 
+      aspectRatio: '4 / 3', 
+      border: '2px dashed #9ca3af', 
+      backgroundColor: '#f3f4f6', 
+      display: 'flex', 
+      flexDirection: 'column', 
+      justifyContent: 'center', 
+      alignItems: 'center', 
+      textAlign: 'center', 
+      transform: 'none' 
+  };
+  
+  const buttonBaseStyle = { 
+      padding: '0.75rem 1.25rem', 
+      fontWeight: '600', 
+      borderRadius: '0.5rem', 
+      width: '100%', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center', 
+      cursor: 'pointer', 
+      border: 'none', 
+      transition: 'background-color 0.3s, transform 0.1s, box-shadow 0.3s', 
+      boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' 
+  };
+  
   const startButtonStyle = { ...buttonBaseStyle, backgroundColor: primaryColor, color: 'white' };
   const stopButtonStyle = { ...buttonBaseStyle, backgroundColor: '#ef4444', color: 'white' };
+  // ---------------------------------------------
+
 
   return (
-    <div style={mainContainerStyle}>
-      <div className="flex flex-col items-center w-full">
-        <div style={contentWrapperStyle}>
-          <div style={leftPanelStyle}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #e5e7eb', paddingBottom: '0.5rem' }}>
-              Kamera & Kontrol
-            </h2>
+    <div className="page-content">
+      <div className="container mb-5">
+        <div style={mainContainerStyle}>
+          <div className="flex flex-col items-center w-full">
+            {/* Menggunakan contentWrapperStyle yang responsif */}
+            <div style={contentWrapperStyle}>
+              
+              {/* Panel Kiri: Kamera & Kontrol */}
+              <div style={leftPanelStyle}>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #e5e7eb', paddingBottom: '0.5rem' }}>
+                  Kamera & Kontrol
+                </h2>
 
-            <div style={{ position: 'relative', marginBottom: '1.5rem', borderRadius: '0.75rem', overflow: 'hidden' }}>
-              <video ref={videoRef} autoPlay playsInline muted style={{ ...videoStyle, display: isDetecting ? 'block' : 'none' }} />
-              {!isDetecting && (
-                <div style={videoPlaceholderStyle}>
-                  <CameraIcon style={{ height: '3rem', width: '3rem', color: '#9ca3af' }} />
-                  <p style={{ fontSize: '1rem', fontWeight: '600', color: '#6b7280', marginTop: '0.75rem' }}>Kamera dinonaktifkan</p>
-                  <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.25rem' }}>Tekan Mulai Deteksi untuk mengaktifkan.</p>
+                <div style={{ position: 'relative', marginBottom: '1.5rem', borderRadius: '0.75rem', overflow: 'hidden' }}>
+                  {/* Video Element */}
+                  <video ref={videoRef} autoPlay playsInline muted style={{ ...videoStyle, display: isDetecting ? 'block' : 'none' }} />
+                  
+                  {/* Placeholder saat kamera mati */}
+                  {!isDetecting && (
+                    <div style={videoPlaceholderStyle}>
+                      <CameraIcon style={{ height: '3rem', width: '3rem', color: '#9ca3af' }} />
+                      <p style={{ fontSize: '1rem', fontWeight: '600', color: '#6b7280', marginTop: '0.75rem' }}>Kamera dinonaktifkan</p>
+                      <p style={{ fontSize: '0.875rem', color: '#9ca3af', marginTop: '0.25rem' }}>Tekan Mulai Deteksi untuk mengaktifkan.</p>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {!isDetecting ? (
-                <button onClick={startDetection} style={startButtonStyle}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = primaryColor}
-                  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.99)'}
-                  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                >
-                  <PlayIcon style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} />
-                  Mulai Deteksi
-                </button>
-              ) : (
-                <button onClick={() => stopDetection(true)} style={stopButtonStyle}
-                  onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
-                  onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
-                  onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.99)'}
-                  onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
-                >
-                  <StopIcon style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} />
-                  Berhenti & Simpan Sesi
-                </button>
-              )}
-            </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {!isDetecting ? (
+                    <button onClick={startDetection} style={startButtonStyle}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#2563eb'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = primaryColor}
+                      onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.99)'}
+                      onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      <PlayIcon style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} />
+                      Mulai Deteksi
+                    </button>
+                  ) : (
+                    <button onClick={() => stopDetection(true)} style={stopButtonStyle}
+                      onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#dc2626'}
+                      onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ef4444'}
+                      onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.99)'}
+                      onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                    >
+                      <StopIcon style={{ height: '1.25rem', width: '1.25rem', marginRight: '0.5rem' }} />
+                      Berhenti & Simpan Sesi
+                    </button>
+                  )}
+                </div>
 
-            {/* Warning / Notification Area */}
-            {(warning || warningText) && (
-              <div style={{
-                marginTop: '1rem',
-                padding: '1rem',
-                fontWeight: '500',
-                borderRadius: '0.5rem',
-                boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)',
-              }}>
-                {warning ? (
-                  <div
-                    style={{
-                      borderLeft: warning.startsWith('⚠️') ? '4px solid #f59e0b' : warning.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
-                      backgroundColor: warning.startsWith('⚠️') ? '#fffbe6' : warning.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
-                      color: warning.startsWith('⚠️') ? '#b58b02' : warning.startsWith('✅') ? '#047857' : '#b91c1c',
-                      padding: '0.5rem',
-                      borderRadius: '0.5rem'
-                    }}
-                    dangerouslySetInnerHTML={{ __html: warning }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      borderLeft: warningText.startsWith('⚠️') ? '4px solid #f59e0b' : warningText.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
-                      backgroundColor: warningText.startsWith('⚠️') ? '#fffbe6' : warningText.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
-                      color: warningText.startsWith('⚠️') ? '#b58b02' : warningText.startsWith('✅') ? '#047857' : '#b91c1c',
-                      padding: '0.5rem',
-                      borderRadius: '0.5rem'
-                    }}
-                  >
-                    <span>{warningText}</span>
+                {/* Warning / Notification Area */}
+                {(warning || warningText) && (
+                  <div style={{
+                    marginTop: '1rem',
+                    padding: '1rem',
+                    fontWeight: '500',
+                    borderRadius: '0.5rem',
+                    boxShadow: '0 1px 3px 0 rgba(0,0,0,0.1)',
+                  }}>
+                    {warning ? (
+                      <div
+                        style={{
+                          borderLeft: warning.startsWith('⚠️') ? '4px solid #f59e0b' : warning.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
+                          backgroundColor: warning.startsWith('⚠️') ? '#fffbe6' : warning.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
+                          color: warning.startsWith('⚠️') ? '#b58b02' : warning.startsWith('✅') ? '#047857' : '#b91c1c',
+                          padding: '0.5rem',
+                          borderRadius: '0.5rem'
+                        }}
+                        dangerouslySetInnerHTML={{ __html: warning }}
+                      />
+                    ) : (
+                      <div
+                        style={{
+                          borderLeft: warningText.startsWith('⚠️') ? '4px solid #f59e0b' : warningText.startsWith('✅') ? '4px solid #10b981' : '4px solid #ef4444',
+                          backgroundColor: warningText.startsWith('⚠️') ? '#fffbe6' : warningText.startsWith('✅') ? '#ecfdf5' : '#fee2e2',
+                          color: warningText.startsWith('⚠️') ? '#b58b02' : warningText.startsWith('✅') ? '#047857' : '#b91c1c',
+                          padding: '0.5rem',
+                          borderRadius: '0.5rem'
+                        }}
+                      >
+                        <span>{warningText}</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
-            )}
-          </div>
 
-          <div style={rightPanelStyle}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #bfdbfe', paddingBottom: '0.5rem' }}>
-              Statistik Real-time
-            </h2>
+              {/* Panel Kanan: Statistik Real-time */}
+              <div style={rightPanelStyle}>
+                <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #bfdbfe', paddingBottom: '0.5rem' }}>
+                  Statistik Real time
+                </h2>
 
-            <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
-              Status deteksi: {isDetecting ? <span style={{ color: '#10b981', fontWeight: 'bold' }}>AKTIF</span> : <span style={{ color: '#f97316', fontWeight: 'bold' }}>TIDAK AKTIF</span>}
-            </p>
+                <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
+                  Status deteksi: {isDetecting ? <span style={{ color: '#10b981', fontWeight: 'bold' }}>AKTIF</span> : <span style={{ color: '#f97316', fontWeight: 'bold' }}>TIDAK AKTIF</span>}
+                </p>
 
-            <div style={statsGridStyle}>
-              <div style={statItemStyle}>
-                <BlinksIcon style={{ height: '1.5rem', width: '1.5rem', color: primaryColor, marginBottom: '0.5rem' }} />
-                <p style={{ fontSize: '2rem', fontWeight: '800', color: primaryColor, lineHeight: 1 }}>{isDetecting ? stats.total_blinks : '--'}</p>
-                <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: '500', marginTop: '0.25rem' }}>Total Kedipan</p>
-              </div>
+                <div style={statsGridStyle}>
+                  <div style={statItemStyle}>
+                    <BlinksIcon style={{ height: '1.5rem', width: '1.5rem', color: primaryColor, marginBottom: '0.5rem' }} />
+                    <p style={{ fontSize: '2rem', fontWeight: '800', color: primaryColor, lineHeight: 1 }}>{isDetecting ? stats.total_blinks : '--'}</p>
+                    <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: '500', marginTop: '0.25rem' }}>Total Kedipan</p>
+                  </div>
 
-              <div style={statItemStyle}>
-                <RateIcon style={{ height: '1.5rem', width: '1.5rem', color: primaryColor, marginBottom: '0.5rem' }} />
-                <p style={{ fontSize: '2rem', fontWeight: '800', color: primaryColor, lineHeight: 1 }}>{isDetecting ? stats.blink_rate : '--'}</p>
-                <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: '500', marginTop: '0.25rem' }}>Rate (per menit)</p>
+                  <div style={statItemStyle}>
+                    <RateIcon style={{ height: '1.5rem', width: '1.5rem', color: primaryColor, marginBottom: '0.5rem' }} />
+                    <p style={{ fontSize: '2rem', fontWeight: '800', color: primaryColor, lineHeight: 1 }}>{isDetecting ? stats.blink_rate : '--'}</p>
+                    <p style={{ fontSize: '0.75rem', textTransform: 'uppercase', color: '#6b7280', fontWeight: '500', marginTop: '0.25rem' }}>Rate (per menit)</p>
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px dashed #bfdbfe' }}>
+                  <p style={{ fontSize: '0.875rem', color: '#4b5563' }}>
+                    **Catatan:** Laju kedipan normal adalah <strong>12-15 kedipan per menit</strong>. Nilai di bawah ini dapat mengindikasikan ketegangan mata.
+                  </p>
+                </div>
               </div>
             </div>
 
-            <div style={{ marginTop: 'auto', paddingTop: '1.5rem', borderTop: '1px dashed #bfdbfe' }}>
-              <p style={{ fontSize: '0.875rem', color: '#4b5563' }}>
-                **Catatan:** Laju kedipan normal adalah <strong>12-15 kedipan per menit</strong>. Nilai di bawah ini dapat mengindikasikan ketegangan mata.
-              </p>
-            </div>
+            <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#9ca3af' }}>API Endpoint: {API_URL}</p>
           </div>
         </div>
-
-        <p style={{ marginTop: '1rem', fontSize: '0.75rem', color: '#9ca3af' }}>API Endpoint: {API_URL}</p>
       </div>
     </div>
+
   );
 }
 

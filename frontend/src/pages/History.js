@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
 // Tambahkan import supabaseClient dan useNavigate untuk mendapatkan user
-import { supabase } from '../supabaseClient'; 
+import { supabase } from '../supabaseClient';
 import { useNavigate } from 'react-router-dom';
 
 const API_URL = "http://127.0.0.1:5000";
@@ -12,7 +12,7 @@ function History() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
-  
+
   useEffect(() => {
     const fetchHistory = async () => {
       // 1. Dapatkan sesi pengguna yang sedang login
@@ -23,9 +23,9 @@ function History() {
         navigate('/login');
         return;
       }
-      
+
       // Dapatkan ID pengguna (user_id)
-      const userId = session.user.id; 
+      const userId = session.user.id;
 
       try {
         // 2. Kirim user_id sebagai query parameter ke backend
@@ -34,7 +34,7 @@ function History() {
             user_id: userId, // Mengirim ID pengguna
           },
         });
-        
+
         setRecords(response.data);
       } catch (error) {
         console.error("Error fetching history:", error);
@@ -48,40 +48,44 @@ function History() {
 
   if (loading) return <p>Memuat history...</p>;
   // ... (rest of the return statement is the same)
-// ...
+  // ...
 
   return (
-    <div className="container mt-4">
-      <h2 className="mb-4 text-center">History Deteksi Kedipan</h2>
+    <div className="page-content">
+      <div className="container mb-5">
+        <div className="container mt-4">
+          <h2 className="mb-4 text-center">History Deteksi Kedipan</h2>
 
-      {records.length > 0 ? (
-        <table className="table table-bordered table-hover text-center">
-          <thead className="table-dark">
-            <tr>
-              <th>No</th>
-              <th>Waktu Terekam</th>
-              <th>Total Kedipan</th>
-              <th>Durasi (detik)</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.map((r, index) => (
-              <tr key={r.id || index}>
-                <td>{index + 1}</td>
-                <td>
-                  {r.captured_at
-                    ? new Date(r.captured_at).toLocaleString("id-ID")
-                    : "-"}
-                </td>
-                <td>{r.blink_count}</td>
-                <td>{r.stare_duration_sec}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      ) : (
-        <p className="text-muted text-center">Belum ada history deteksi.</p>
-      )}
+          {records.length > 0 ? (
+            <table className="table table-bordered table-hover text-center">
+              <thead className="table-dark">
+                <tr>
+                  <th>No</th>
+                  <th>Waktu Terekam</th>
+                  <th>Total Kedipan</th>
+                  <th>Durasi (detik)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {records.map((r, index) => (
+                  <tr key={r.id || index}>
+                    <td>{index + 1}</td>
+                    <td>
+                      {r.captured_at
+                        ? new Date(r.captured_at).toLocaleString("id-ID")
+                        : "-"}
+                    </td>
+                    <td>{r.blink_count}</td>
+                    <td>{r.stare_duration_sec}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="text-muted text-center">Belum ada history deteksi.</p>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
