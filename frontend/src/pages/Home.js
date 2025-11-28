@@ -1,3 +1,4 @@
+// frontend/src/pages/Home.js
 import React, { useState, useEffect, useMemo } from 'react';
 import axios from 'axios';
 import { Line } from 'react-chartjs-2';
@@ -23,7 +24,7 @@ const API_URL = 'http://127.0.0.1:5000';
 function Home() {
   const [chartData, setChartData] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(null); // State ini menyimpan object user Supabase
   const [error, setError] = useState(null);
 
   // State baru untuk menyimpan raw data dan filter
@@ -32,6 +33,19 @@ function Home() {
   const [refreshing, setRefreshing] = useState(false);
 
   const navigate = useNavigate();
+
+  // ========================================================
+  // >>> PERUBAHAN BARU: Mengatur Judul Halaman <<<
+  // ========================================================
+  useEffect(() => {
+    document.title = 'Home';
+
+    // Cleanup function: mengembalikan judul lama saat komponen di-unmount 
+    // (Opsional, tapi baik untuk menjaga kebersihan jika Anda ingin judul default)
+    return () => {
+      document.title = 'React App'; // Ganti dengan judul default aplikasi Anda jika ada
+    };
+  }, []);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -197,18 +211,27 @@ function Home() {
         <div className="container mt-5 mb-5">
           <div className="text-center mb-4">
             <h2 className="fw-bold text-primary">Dashboard EyeCare</h2>
-            <p className="text-muted">Pantau kebiasaan dan kesehatan mata Anda.</p>
+            <p className="text-muted mb-1">
+              Login sebagai:
+              <strong className="text-secondary ms-1">
+                {user ? user.email : 'Memuat...'}
+              </strong>
+            </p>
+            <p className="text-muted mt-0">Pantau kebiasaan dan kesehatan mata Anda.</p>
           </div>
 
           <div className="card shadow-lg border-0 rounded-4 mx-auto" style={{ maxWidth: '1000px' }}>
-            {/* HEADER CARD: Judul & Kontrol Filter */}
-            <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap justify-content-between align-items-center gap-3">
-              <div>
+            {/* HEADER CARD: Judul & Kontrol Filter (PERUBAHAN DI SINI) */}
+            <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap 
+ justify-content-center justify-content-md-between align-items-center gap-3">
+              {/* Judul Analisis (text-center pada layar kecil) */}
+              <div className="text-center text-md-start">
                 <h5 className="mb-1 fw-bold text-dark">Analisis Kebiasaan</h5>
                 <small className="text-muted">Grafik rata-rata harian</small>
               </div>
 
-              <div className="d-flex gap-2">
+              {/* Kontrol Filter (Diatur rata tengah pada layar kecil) */}
+              <div className="d-flex gap-2 justify-content-center">
                 {/* DROPDOWN FILTER HARI */}
                 <select
                   className="form-select form-select-sm shadow-none border-secondary-subtle"
@@ -231,7 +254,6 @@ function Home() {
                 </button>
               </div>
             </div>
-
             <div className="card-body p-4" style={{ height: '450px' }}>
               {loading ? (
                 <div className="d-flex flex-column justify-content-center align-items-center h-100">

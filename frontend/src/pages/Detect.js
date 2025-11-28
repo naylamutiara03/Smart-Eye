@@ -92,7 +92,7 @@ const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
           {isStrict ? 'Peringatan lebih sensitif dan sering.' : 'Peringatan standar, cocok untuk pekerjaan umum.'}
         </span>
       </div>
-      
+
       <div style={switchContainerStyle} onClick={() => setDetectionMode(isStrict ? 'focus' : 'strict')}>
         <div style={switchButtonStyle} />
       </div>
@@ -109,10 +109,10 @@ function Detect() {
   const [warningText, setWarningText] = useState('');
   const [startTime, setStartTime] = useState(null);
   const [showHistoryButton, setShowHistoryButton] = useState(false);
-  
+
   // --- STATE BARU: Detection Mode ('focus' atau 'strict') ---
-  const [detectionMode, setDetectionMode] = useState('focus'); 
-  
+  const [detectionMode, setDetectionMode] = useState('focus');
+
   const [isMobileView, setIsMobileView] = useState(window.innerWidth <= 768);
 
   const videoRef = useRef(null);
@@ -122,6 +122,16 @@ function Detect() {
   // Audio untuk notifikasi
   const beep = useRef(new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg"));
 
+  useEffect(() => {
+    document.title = 'Detect';
+
+    // Cleanup function: mengembalikan judul lama saat komponen di-unmount 
+    // (Opsional, tapi baik untuk menjaga kebersihan jika Anda ingin judul default)
+    return () => {
+      document.title = 'React App'; // Ganti dengan judul default aplikasi Anda jika ada
+    };
+  }, []);
+
   // --- EFFECT UNTUK HANDLE RESIZE DAN CLEANUP ---
   useEffect(() => {
     const handleResize = () => {
@@ -129,15 +139,15 @@ function Detect() {
     };
 
     window.addEventListener('resize', handleResize);
-    handleResize(); 
+    handleResize();
 
     if (Notification && Notification.permission !== "granted") {
       Notification.requestPermission().catch(() => { });
     }
-    
+
     return () => {
       window.removeEventListener('resize', handleResize);
-      stopDetection(false); 
+      stopDetection(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -199,8 +209,8 @@ function Detect() {
         try {
           let res;
           // Payload sekarang menyertakan mode
-          const payload = { 
-            image: frame, 
+          const payload = {
+            image: frame,
             mode: detectionMode // <-- Kirim mode deteksi ke backend 
           };
 
@@ -343,16 +353,16 @@ function Detect() {
     justifyContent: 'center',
     alignItems: 'flex-start',
   };
-  
+
   // LOGIC RESPONSIVITAS DI SINI:
   const contentWrapperStyle = {
     display: 'flex',
-    flexDirection: isMobileView ? 'column' : 'row', 
+    flexDirection: isMobileView ? 'column' : 'row',
     gap: '1.5rem',
     maxWidth: '1000px',
     width: '100%',
   };
-  
+
   const cardBaseStyle = {
     backgroundColor: 'white',
     padding: '1.5rem',
@@ -360,72 +370,72 @@ function Detect() {
     boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
     transition: 'box-shadow 0.3s ease',
   };
-  
-  const leftPanelStyle = { 
-      ...cardBaseStyle, 
-      flex: isMobileView ? '1' : '3' 
+
+  const leftPanelStyle = {
+    ...cardBaseStyle,
+    flex: isMobileView ? '1' : '3'
   };
-  
-  const rightPanelStyle = { 
-      ...cardBaseStyle, 
-      flex: isMobileView ? '1' : '2', 
-      backgroundColor: secondaryBg, 
-      display: 'flex', 
-      flexDirection: 'column' 
+
+  const rightPanelStyle = {
+    ...cardBaseStyle,
+    flex: isMobileView ? '1' : '2',
+    backgroundColor: secondaryBg,
+    display: 'flex',
+    flexDirection: 'column'
   };
-  
-  const statsGridStyle = { 
-      display: 'grid', 
-      gridTemplateColumns: 'repeat(2, 1fr)', 
-      gap: '1rem', 
-      marginTop: '1rem' 
+
+  const statsGridStyle = {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
+    gap: '1rem',
+    marginTop: '1rem'
   };
-  
-  const statItemStyle = { 
-      padding: '1rem', 
-      backgroundColor: 'white', 
-      borderRadius: '0.75rem', 
-      textAlign: 'center', 
-      boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)' 
+
+  const statItemStyle = {
+    padding: '1rem',
+    backgroundColor: 'white',
+    borderRadius: '0.75rem',
+    textAlign: 'center',
+    boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)'
   };
-  
-  const videoStyle = { 
-      width: '100%', 
-      height: 'auto', 
-      aspectRatio: '4 / 3', 
-      objectFit: 'cover', 
-      transform: 'scaleX(-1)', 
-      borderRadius: '0.75rem', 
-      backgroundColor: '#374151' 
+
+  const videoStyle = {
+    width: '100%',
+    height: 'auto',
+    aspectRatio: '4 / 3',
+    objectFit: 'cover',
+    transform: 'scaleX(-1)',
+    borderRadius: '0.75rem',
+    backgroundColor: '#374151'
   };
-  
-  const videoPlaceholderStyle = { 
-      ...videoStyle, 
-      aspectRatio: '4 / 3', 
-      border: '2px dashed #9ca3af', 
-      backgroundColor: '#f3f4f6', 
-      display: 'flex', 
-      flexDirection: 'column', 
-      justifyContent: 'center', 
-      alignItems: 'center', 
-      textAlign: 'center', 
-      transform: 'none' 
+
+  const videoPlaceholderStyle = {
+    ...videoStyle,
+    aspectRatio: '4 / 3',
+    border: '2px dashed #9ca3af',
+    backgroundColor: '#f3f4f6',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    alignItems: 'center',
+    textAlign: 'center',
+    transform: 'none'
   };
-  
-  const buttonBaseStyle = { 
-      padding: '0.75rem 1.25rem', 
-      fontWeight: '600', 
-      borderRadius: '0.5rem', 
-      width: '100%', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      cursor: 'pointer', 
-      border: 'none', 
-      transition: 'background-color 0.3s, transform 0.1s, box-shadow 0.3s', 
-      boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' 
+
+  const buttonBaseStyle = {
+    padding: '0.75rem 1.25rem',
+    fontWeight: '600',
+    borderRadius: '0.5rem',
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    border: 'none',
+    transition: 'background-color 0.3s, transform 0.1s, box-shadow 0.3s',
+    boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)'
   };
-  
+
   const startButtonStyle = { ...buttonBaseStyle, backgroundColor: primaryColor, color: 'white' };
   const stopButtonStyle = { ...buttonBaseStyle, backgroundColor: '#ef4444', color: 'white' };
   // ---------------------------------------------
@@ -436,8 +446,23 @@ function Detect() {
       <div className="container mb-5">
         <div style={mainContainerStyle}>
           <div className="flex flex-col items-center w-full">
+
+            {/* ========================================================== */}
+            {/* >>> PERUBAHAN BARU: Tambahkan Judul di atas Card <<< */}
+            {/* ========================================================== */}
+            <h1 style={{
+              fontSize: isMobileView ? '2rem' : '2.5rem',
+              fontWeight: '800',
+              color: primaryColor,
+              marginBottom: '1.5rem',
+              textAlign: 'center'
+            }}>
+              Detect Your Eyes 👁️
+            </h1>
+            {/* ========================================================== */}
+            
             <div style={contentWrapperStyle}>
-              
+
               {/* Panel Kiri: Kamera & Kontrol */}
               <div style={leftPanelStyle}>
                 <h2 style={{ fontSize: '1.5rem', fontWeight: '700', color: '#1f2937', marginBottom: '1rem', borderBottom: '1px solid #e5e7eb', paddingBottom: '0.5rem' }}>
@@ -447,7 +472,7 @@ function Detect() {
                 <div style={{ position: 'relative', marginBottom: '1.5rem', borderRadius: '0.75rem', overflow: 'hidden' }}>
                   {/* Video Element */}
                   <video ref={videoRef} autoPlay playsInline muted style={{ ...videoStyle, display: isDetecting ? 'block' : 'none' }} />
-                  
+
                   {/* Placeholder saat kamera mati */}
                   {!isDetecting && (
                     <div style={videoPlaceholderStyle}>
@@ -528,12 +553,12 @@ function Detect() {
                 <p style={{ color: '#6b7280', fontSize: '0.875rem', marginBottom: '0.5rem' }}>
                   Status deteksi: {isDetecting ? <span style={{ color: '#10b981', fontWeight: 'bold' }}>AKTIF</span> : <span style={{ color: '#f97316', fontWeight: 'bold' }}>TIDAK AKTIF</span>}
                 </p>
-                
+
                 {/* --- KOMPONEN MODE TOGGLE BARU DI SINI --- */}
-                <ModeToggle 
-                    detectionMode={detectionMode} 
-                    setDetectionMode={setDetectionMode}
-                    isDetecting={isDetecting}
+                <ModeToggle
+                  detectionMode={detectionMode}
+                  setDetectionMode={setDetectionMode}
+                  isDetecting={isDetecting}
                 />
                 {/* ------------------------------------------- */}
 

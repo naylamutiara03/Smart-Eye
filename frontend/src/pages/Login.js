@@ -1,3 +1,4 @@
+// frontend/src/pages/Login.js
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import { useNavigate, Link } from 'react-router-dom';
@@ -7,10 +8,10 @@ function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState(''); // State baru untuk pesan sukses
+  const [success, setSuccess] = useState(''); 
   const [loading, setLoading] = useState(false);
-  const [isResetting, setIsResetting] = useState(false); // State untuk mengaktifkan mode reset
-  const [resetEmail, setResetEmail] = useState(''); // State untuk email reset
+  const [isResetting, setIsResetting] = useState(false); 
+  const [resetEmail, setResetEmail] = useState(''); 
   const navigate = useNavigate();
 
   // --- FUNGSI LOGIN UTAMA ---
@@ -47,7 +48,7 @@ function Login() {
     }
   };
 
-  // --- FUNGSI LUPA PASSWORD ---
+  // --- FUNGSI LUPA PASSWORD (Diperbarui) ---
   const handlePasswordReset = async (e) => {
     e.preventDefault();
     setError('');
@@ -55,20 +56,23 @@ function Login() {
     setLoading(true);
 
     try {
-      // Menggunakan resetPasswordForEmail untuk mengirim link reset
       const { error: resetError } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        // Opsional: Tentukan halaman kemana user akan diarahkan setelah klik link di email
         redirectTo: `${window.location.origin}/update-password`,
       });
 
       if (resetError) {
-        setError(resetError.message);
+        // Jika Supabase mengembalikan error (misalnya: invalid email format, atau masalah server)
+        setError('Gagal mengirim tautan reset. Pesan error: ' + resetError.message);
         return;
       }
 
-      setSuccess('Link reset password telah dikirim ke email Anda. Silakan cek kotak masuk.');
+      // Supabase SELALU mengembalikan sukses di sini, terlepas dari apakah email terdaftar.
+      // Ini adalah perilaku keamanan standar. Kita harus menampilkan pesan yang ambigu.
+      
+      setSuccess('Jika email terdaftar, tautan reset password telah dikirim ke kotak masuk Anda. Silakan cek.');
+      
       // Kembali ke mode login setelah sukses
-      setTimeout(() => setIsResetting(false), 3000);
+      setTimeout(() => setIsResetting(false), 5000); // Waktu lebih lama agar user sempat membaca
 
     } catch (err) {
       console.error("Error reset password:", err);
@@ -158,7 +162,8 @@ function Login() {
         ) : (
           <form onSubmit={handlePasswordReset}>
             {/* FORM RESET PASSWORD */}
-            <p className="text-muted text-center small mb-3">Masukkan email yang terdaftar. Kami akan mengirimkan tautan reset.</p>
+            {/* Peringatan kecil yang diperbarui agar lebih informatif */}
+            <p className="text-muted text-center small mb-3">Masukkan email Anda. Kami akan mengirimkan tautan reset jika email tersebut terdaftar.</p> 
             <div className="mb-4">
               <label htmlFor="resetEmail" className="form-label fw-semibold">Email</label>
               <input

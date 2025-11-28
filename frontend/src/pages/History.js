@@ -14,6 +14,16 @@ function History() {
   const navigate = useNavigate();
 
   useEffect(() => {
+      document.title = 'History';
+  
+      // Cleanup function: mengembalikan judul lama saat komponen di-unmount 
+      // (Opsional, tapi baik untuk menjaga kebersihan jika Anda ingin judul default)
+      return () => {
+        document.title = 'React App'; // Ganti dengan judul default aplikasi Anda jika ada
+      };
+    }, []);
+
+  useEffect(() => {
     const fetchHistory = async () => {
       const { data: { session } } = await supabase.auth.getSession();
 

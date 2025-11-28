@@ -1,11 +1,11 @@
 import React, { useLayoutEffect, useRef, useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { gsap } from 'gsap';
-// Hapus import GoArrowUpRight jika tidak digunakan, namun saya biarkan agar tidak menimbulkan error baru
-// Jika Anda mendapatkan error "GoArrowUpRight is defined but never used", abaikan saja atau hapus importnya
-// import { GoArrowUpRight } from 'react-icons/go'; 
 import { supabase } from '../supabaseClient';
 import './CardNav.css'; // Import CSS yang telah diubah
+
+// 1. IMPOR IKON BARU DARI LUCIDE-REACT
+import { Home, Camera, History, LogOut } from 'lucide-react'; 
 
 // ===============================================
 // Komponen CardNav yang Diadaptasi
@@ -22,8 +22,10 @@ const CardNavLink = React.forwardRef(({ to, label, icon, onClick, style, classNa
     style={style}
     onClick={onClick}
   >
-    <div className="nav-card-label">
-      {icon} {label}
+    <div className="nav-card-label d-flex align-items-center"> {/* Tambah d-flex untuk menyelaraskan ikon */}
+      {/* RENDER IKON DI SINI */}
+      {React.cloneElement(icon, { size: 20, className: "me-2" })} 
+      {label}
     </div>
   </NavLink>
 ));
@@ -40,12 +42,12 @@ function CardNavbar() {
   const cardsRef = useRef([]);
   const tlRef = useRef(null);
 
-  // Data Navigasi Utama (HAPUS ITEM LOGOUT)
+  // 2. DATA NAVIGASI UTAMA (TAMBAHKAN PROPERTI ICON)
   const navItems = [
-    { to: '/', label: 'Home', bgColor: '#e0f7fa', textColor: '#006064' },
-    { to: '/detect', label: 'Deteksi', bgColor: '#fff3e0', textColor: '#e65100' },
-    { to: '/history', label: 'History', bgColor: '#e8f5e9', textColor: '#2e7d32' },
-    { to: '/logout', label: 'Logout', bgColor: '#ffebee', textColor: '#c62828', isLogout: true }
+    { to: '/', label: 'Home', icon: <Home />, bgColor: '#e0f7fa', textColor: '#006064' },
+    { to: '/detect', label: 'Detect', icon: <Camera />, bgColor: '#fff3e0', textColor: '#e65100' },
+    { to: '/history', label: 'History', icon: <History />, bgColor: '#e8f5e9', textColor: '#2e7d32' },
+    { to: '/logout', label: 'Logout', icon: <LogOut />, bgColor: '#ffebee', textColor: '#c62828', isLogout: true }
   ];
 
 
@@ -64,6 +66,7 @@ function CardNavbar() {
   const closeModal = () => setShowModal(false);
 
   // --- LOGIC GSAP ANIMATION ---
+  // ... (calculateHeight, createTimeline, useLayoutEffect, useLayoutEffect resize remain the same) ...
 
   const calculateHeight = () => {
     const navEl = navRef.current;
@@ -75,8 +78,9 @@ function CardNavbar() {
       const topBar = 55; // Tinggi nav-top baru
       const padding = 16;
 
-      // Hitungan tinggi card mobile: (3 item * 50px) + (2 gap * 8px) = 150 + 16 = 166px
-      const contentHeight = (navItems.length * 50) + ((navItems.length - 1) * 8);
+      // Hitungan tinggi card mobile: (4 item * 50px) + (3 gap * 8px) = 200 + 24 = 224px
+      // Menggunakan navItems.length yang sekarang 4
+      const contentHeight = (navItems.length * 50) + ((navItems.length - 1) * 8); 
 
       return topBar + contentHeight + padding;
     }
@@ -213,6 +217,7 @@ function CardNavbar() {
         <div className="card-nav-content" aria-hidden={!isExpanded}>
           {navItems.map((item, idx) => (
             item.isLogout ? (
+              // 4. PERBARUI ITEM LOGOUT DENGAN IKON
               <div
                 key="logout"
                 ref={setCardRef(idx)}
@@ -220,13 +225,17 @@ function CardNavbar() {
                 style={{ backgroundColor: item.bgColor, color: item.textColor }}
                 onClick={openModal}
               >
-                <div className="nav-card-label">{item.label}</div>
+                <div className="nav-card-label d-flex align-items-center">
+                  {React.cloneElement(item.icon, { size: 20, className: "me-2" })}
+                  {item.label}
+                </div>
               </div>
             ) : (
               <CardNavLink
                 key={item.to}
                 to={item.to}
                 label={item.label}
+                icon={item.icon} // Meneruskan ikon
                 ref={setCardRef(idx)}
                 style={{ backgroundColor: item.bgColor, color: item.textColor }}
                 onClick={handleNavLinkClick}
@@ -234,7 +243,7 @@ function CardNavbar() {
             )
           ))}
           {/* Tambahkan card Logout untuk Mobile saja jika diperlukan, 
-              namun karena Anda bilang sudah ada di luar, kita biarkan hanya 3 item */}
+          	 namun karena Anda bilang sudah ada di luar, kita biarkan hanya 3 item */}
         </div>
       </nav>
 
