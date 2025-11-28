@@ -11,6 +11,7 @@
     "axios": "^1.12.2",
     "bootstrap": "^5.3.8",
     "chart.js": "^4.5.0",
+    "feather-icons-react": "^1.0.0",
     "gsap": "^3.13.0",
     "lucide-react": "^0.554.0",
     "react": "^19.2.0",
