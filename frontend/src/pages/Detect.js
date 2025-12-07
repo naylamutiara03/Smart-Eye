@@ -177,6 +177,9 @@ function Detect() {
   const [warningText, setWarningText] = useState("");
   const [startTime, setStartTime] = useState(null);
   const [showHistoryButton, setShowHistoryButton] = useState(false);
+  // State baru untuk menyimpan gambar stream dari backend
+  const [imageSrc, setImageSrc] = useState(null);
+
   const { currentDevice } = useDevice();
 
   // --- STATE BARU: Detection Mode ('focus' atau 'strict') ---
@@ -184,8 +187,6 @@ function Detect() {
 
   const [isMobileView, setIsMobileView] = useState(window.innerWidth <= 768);
 
-  const videoRef = useRef(null);
-  const streamRef = useRef(null);
   const intervalRef = useRef(null);
 
   // Audio untuk notifikasi
@@ -195,11 +196,8 @@ function Detect() {
 
   useEffect(() => {
     document.title = "Detect";
-
-    // Cleanup function: mengembalikan judul lama saat komponen di-unmount
-    // (Opsional, tapi baik untuk menjaga kebersihan jika Anda ingin judul default)
     return () => {
-      document.title = "React App"; // Ganti dengan judul default aplikasi Anda jika ada
+      document.title = "React App";
     };
   }, []);
 
@@ -218,7 +216,10 @@ function Detect() {
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      stopDetection(false);
+      // Panggil stop tanpa save saat unmount
+      if (isDetecting) {
+        clearInterval(intervalRef.current);
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -239,25 +240,9 @@ function Detect() {
     }
   };
 
-  const captureFrame = () => {
-    if (!videoRef.current || videoRef.current.readyState < 2) return null;
-    const canvas = document.createElement("canvas");
-    const width = 240;
-    const height =
-      (videoRef.current.videoHeight / videoRef.current.videoWidth) * width;
-    canvas.width = width;
-    canvas.height = height;
-    canvas.getContext("2d").drawImage(videoRef.current, 0, 0, width, height);
-    return canvas.toDataURL("image/jpeg", 0.6);
-  };
-
+  // --- MODIFIKASI: START DETECTION (POLLING MODE) ---
   const startDetection = async () => {
     try {
-      if (!videoRef.current) {
-        setWarning("❌ Tidak bisa memulai deteksi. Elemen video belum siap.");
-        return;
-      }
-
       const {
         data: { session },
       } = await supabase.auth.getSession();
@@ -266,93 +251,74 @@ function Detect() {
         return;
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      videoRef.current.srcObject = stream;
-      streamRef.current = stream;
+      // Mulai state
       setStartTime(new Date().toISOString());
       setIsDetecting(true);
       setWarning("");
       setWarningText("");
+      setImageSrc(null);
 
-      // Interval: gunakan 300ms agar CPU friendly namun responsif.
+      // Interval polling ke backend (bukan akses kamera lokal)
       intervalRef.current = setInterval(async () => {
-        const frame = captureFrame();
-        if (!frame) return;
-
         try {
-          let res;
-          // Payload sekarang menyertakan mode
-          const payload = {
-            image: frame,
-            mode: detectionMode, // <-- Kirim mode deteksi ke backend
-          };
+          // Ambil data terbaru dari memori server
+          const res = await axios.get(`${API_URL}/stream/latest`);
 
-          // Retry 3x dengan exponential backoff
-          for (let i = 0; i < 3; i++) {
-            try {
-              res = await axios.post(`${API_URL}/process_frame`, payload, {
-                timeout: 5000,
-              });
-              break;
-            } catch (err) {
-              if (i < 2) {
-                await new Promise((r) => setTimeout(r, Math.pow(2, i) * 500));
-              } else {
-                throw err;
+          if (res.data.status === "online") {
+            const data = res.data.data;
+
+            // Update Gambar
+            setImageSrc(data.image);
+
+            // Update Stats
+            setStats({
+              total_blinks: data.blink_count ?? 0,
+              blink_rate: data.blink_rate ?? 0,
+            });
+
+            // Handle Pesan Peringatan dari Backend
+            const msg = data.message || "";
+            if (msg.includes("⚠️")) {
+              setWarning(msg);
+              // Mainkan bunyi hanya sekali per peringatan baru (opsional logic)
+              if (warningText !== msg) {
+                beep.current && beep.current.play().catch(() => {});
+                showNotification(msg);
+              }
+            } else if (msg.includes("✅")) {
+              // Normal
+            } else {
+              if (!warningText.startsWith("✅")) {
+                setWarning("");
               }
             }
-          }
-          if (!res) return;
-
-          // Update stats
-          setStats({
-            total_blinks: res.data.total_blinks ?? 0,
-            blink_rate: res.data.blink_rate ?? 0,
-          });
-
-          // Handle pesan dari backend
-          const msg = res.data.message || "";
-          if (msg.includes("⚠️")) {
-            setWarning(msg);
-            beep.current && beep.current.play().catch(() => {});
-            showNotification(msg);
-          } else if (msg.includes("✅")) {
-            // Biarkan diproses saat stop
           } else {
-            if (!warningText.startsWith("✅")) {
-              setWarning("");
-            }
+            // Jika offline
+            setWarning(
+              "⚠️ Kamera offline. Pastikan camera_client.py berjalan."
+            );
           }
         } catch (err) {
-          console.error("Error processing frame:", err);
-          setWarning("Gagal memproses frame atau koneksi terputus.");
-          stopDetection(false);
+          console.error("Error polling stream:", err);
         }
-      }, 300);
+      }, 100); // Poll setiap 100ms (10 FPS)
     } catch (err) {
       console.error("startDetection error:", err);
-      setWarning("❌ Tidak bisa mengakses kamera: " + (err?.message || err));
+      setWarning("Gagal memulai sesi: " + (err?.message || err));
     }
   };
 
+  // --- MODIFIKASI: STOP DETECTION ---
   const stopDetection = async (saveRecord = true) => {
-    // 1. Cleanup interval dan stream (Stop Kamera)
+    // 1. Hentikan interval polling
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
-    if (streamRef.current) {
-      try {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-      } catch (e) {
-        /* ignore */
-      }
-      if (videoRef.current) videoRef.current.srcObject = null;
-      streamRef.current = null;
-    }
 
     // 2. Update State UI
     setIsDetecting(false);
+    setImageSrc(null); // Clear gambar
 
     // 3. Ambil User ID dari Session
     let userId = null;
@@ -367,32 +333,28 @@ function Detect() {
       console.error("Gagal mendapatkan sesi Supabase:", e);
     }
 
-    // 4. Ambil Device ID dari Context (Perubahan Utama)
-    // Pastikan 'currentDevice' sudah diambil dari useDevice() di atas
+    // 4. Ambil Device ID (Opsional, jika menggunakan context)
     const deviceId = currentDevice?.id || null;
 
-    // 5. Siapkan Payload Data
+    // 5. Siapkan Payload Data (Gunakan stats terakhir dari polling)
     const payload = {
       total_blinks: stats.total_blinks,
       blink_rate: stats.blink_rate,
       start_time: startTime,
       end_time: new Date().toISOString(),
       user_id: userId,
-      device_id: deviceId, // <-- Menggunakan Device ID yang dipilih
+      device_id: deviceId,
       detection_mode: detectionMode,
     };
 
     // 6. Reset Statistik Lokal
     setStats({ total_blinks: 0, blink_rate: 0 });
 
-    // 7. Kirim Data ke Backend (Jika user login & saveRecord true)
+    // 7. Kirim Data ke Backend untuk disimpan
     if (saveRecord && payload.user_id) {
-      // Peringatan jika device belum dipilih
       if (!deviceId) {
-        setWarning(
-          "⚠️ Perangkat tidak dipilih. Data mungkin tidak tersimpan dengan benar."
-        );
-        // Kita tidak return, biarkan tetap mencoba simpan (opsional)
+        // Warning opsional jika device belum dipilih, tapi tetap simpan
+        // setWarning("⚠️ Perangkat tidak dipilih...");
       }
 
       try {
@@ -423,8 +385,6 @@ function Detect() {
         setWarning(`${successMessage}${historyButtonHtml}`);
         setWarningText(successMessage);
         setShowHistoryButton(true);
-
-        console.log("Deteksi dihentikan. Response:", res.data);
       } catch (err) {
         console.error("Error stopping detection:", err);
         setWarning(
@@ -434,7 +394,6 @@ function Detect() {
         );
       }
     } else {
-      // Logic jika tidak save atau tidak login
       setWarning("");
       setWarningText("");
       setShowHistoryButton(false);
@@ -510,7 +469,7 @@ function Detect() {
     height: "auto",
     aspectRatio: "4 / 3",
     objectFit: "cover",
-    transform: "scaleX(-1)",
+    // transform: "scaleX(-1)", // Mirror tidak diperlukan jika gambar dari backend sudah benar
     borderRadius: "0.75rem",
     backgroundColor: "#374151",
   };
@@ -597,22 +556,22 @@ function Detect() {
                     marginBottom: "1.5rem",
                     borderRadius: "0.75rem",
                     overflow: "hidden",
+                    minHeight: "300px", // Tambahan agar tidak collapse
+                    backgroundColor: "#f3f4f6",
                   }}
                 >
-                  {/* Video Element */}
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    style={{
-                      ...videoStyle,
-                      display: isDetecting ? "block" : "none",
-                    }}
-                  />
-
-                  {/* Placeholder saat kamera mati */}
-                  {!isDetecting && (
+                  {/* MODIFIKASI: Menggunakan IMG tag untuk stream dari backend */}
+                  {isDetecting && imageSrc ? (
+                    <img
+                      src={imageSrc}
+                      alt="Live Stream"
+                      style={{
+                        ...videoStyle,
+                        display: "block",
+                      }}
+                    />
+                  ) : (
+                    // Placeholder saat kamera mati atau stream belum masuk
                     <div style={videoPlaceholderStyle}>
                       <CameraIcon
                         style={{
@@ -629,7 +588,9 @@ function Detect() {
                           marginTop: "0.75rem",
                         }}
                       >
-                        Kamera dinonaktifkan
+                        {isDetecting
+                          ? "Menunggu koneksi kamera..."
+                          : "Kamera dinonaktifkan"}
                       </p>
                       <p
                         style={{
@@ -638,7 +599,9 @@ function Detect() {
                           marginTop: "0.25rem",
                         }}
                       >
-                        Tekan Mulai Deteksi untuk mengaktifkan.
+                        {isDetecting
+                          ? "Pastikan camera_client.py berjalan"
+                          : "Tekan Mulai Deteksi untuk mengaktifkan."}
                       </p>
                     </div>
                   )}

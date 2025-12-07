@@ -20,6 +20,14 @@ START_TIME = None
 BLINK_TIMESTAMPS = deque()
 EYE_CLOSED = False
 
+LATEST_STREAM_DATA = {
+    "image": None,
+    "blink_count": 0,
+    "blink_rate": 0,
+    "message": "Menunggu kamera...",
+    "last_update": 0
+}
+
 
 def eye_aspect_ratio(eye):
     """Hitung Eye Aspect Ratio (EAR)"""
@@ -57,7 +65,7 @@ def get_history():
 
 @app.route('/process_frame', methods=['POST'])
 def process_frame():
-    global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS, BASE_EAR_THRESHOLD
+    global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS, BASE_EAR_THRESHOLD, LATEST_STREAM_DATA
 
     data = request.get_json()
 
@@ -141,6 +149,14 @@ def process_frame():
         else:
             message = f"✅ Deteksi berjalan normal. Laju kedipan: {blink_rate}/menit (Mode: {detection_mode.upper()})"
 
+        LATEST_STREAM_DATA = {
+            "image": data['image'], # Gambar base64 dari camera_client
+            "blink_count": blink_count,
+            "blink_rate": blink_rate,
+            "message": message,
+            "last_update": time.time()
+        }
+
         return jsonify({
             "message": message,
             "total_blinks": TOTAL_BLINKS,
@@ -153,6 +169,17 @@ def process_frame():
         "total_blinks": TOTAL_BLINKS,
         "blink_count": blink_count,
         "blink_rate": 0
+    })
+
+@app.route('/stream/latest', methods=['GET'])
+def get_latest_stream():
+    # Cek apakah data masih "segar" (misal update terakhir < 5 detik lalu)
+    if time.time() - LATEST_STREAM_DATA['last_update'] > 5:
+        return jsonify({"status": "offline", "message": "Kamera tidak aktif/terputus."})
+    
+    return jsonify({
+        "status": "online",
+        "data": LATEST_STREAM_DATA
     })
 
 @app.route('/devices', methods=['GET'])
