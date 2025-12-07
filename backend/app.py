@@ -155,6 +155,41 @@ def process_frame():
         "blink_rate": 0
     })
 
+@app.route('/devices', methods=['GET'])
+def get_devices():
+    user_id = request.args.get('user_id')
+    if not user_id:
+        return jsonify({"error": "User ID required"}), 400
+    
+    try:
+        # Ambil semua device milik user
+        response = supabase.table("devices").select("*").eq("user_id", user_id).execute()
+        return jsonify(response.data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route('/devices', methods=['POST'])
+def register_device():
+    data = request.get_json()
+    user_id = data.get('user_id')
+    device_name = data.get('device_name')
+
+    if not user_id or not device_name:
+        return jsonify({"error": "Data incomplete"}), 400
+
+    try:
+        new_device = {
+            "user_id": user_id,
+            "device_name": device_name,
+            "is_active": True,
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_date": datetime.now(UTC).isoformat()
+        }
+        response = supabase.table("devices").insert(new_device).execute()
+        return jsonify(response.data[0])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 @app.route('/stop_detection', methods=['POST'])
 def stop_detection():
@@ -218,6 +253,9 @@ def stop_detection():
             EYE_CLOSED = False
             LAST_BLINK_TIME = time.time()
             return jsonify({"error": f"Gagal menyimpan data ke Supabase: {str(e)}"}), 500
+        
+    if current_device_id:
+        supabase.table("devices").update({"last_seen_at": datetime.now(UTC).isoformat()}).eq("id", current_device_id).execute()
 
     TOTAL_BLINKS = 0
     START_TIME = None
