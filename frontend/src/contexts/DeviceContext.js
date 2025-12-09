@@ -12,6 +12,7 @@ export const DeviceProvider = ({ children }) => {
   const [loading, setLoading] = useState(true);
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [user, setUser] = useState(null);
+  const [activeDeviceId, setActiveDeviceId] = useState(null); // ID hardware yang terdeteksi otomatis
 
   const API_URL = "http://127.0.0.1:5000"; // Sesuaikan port backend
 
@@ -46,24 +47,44 @@ export const DeviceProvider = ({ children }) => {
     return () => authListener.subscription.unsubscribe();
   }, []);
 
-  // 2. Fetch Devices dari Backend
+  // Fungsi Scan Otomatis (Helper untuk Detect.js & Add Device)
+  const autoDetectDevice = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/stream/latest`);
+
+      if (res.data.status === "online" && res.data.data.hardware_id) {
+        const detectedId = res.data.data.hardware_id;
+        setActiveDeviceId(detectedId);
+        console.log("Device terdeteksi otomatis:", detectedId);
+        return detectedId;
+      }
+      return null;
+    } catch (error) {
+      // Silent error agar tidak memenuhi console jika offline
+      return null;
+    }
+  };
+
+  // 2. Fetch Devices dari Database
   const fetchDevices = async (userId) => {
     try {
-      const res = await axios.get(`${API_URL}/devices`, {
-        params: { user_id: userId },
-      });
-      const deviceList = res.data;
+      // Kita ambil langsung dari Supabase agar lebih cepat dan aman
+      const { data, error } = await supabase
+        .from("devices")
+        .select("*")
+        .eq("user_id", userId);
 
+      if (error) throw error;
+
+      const deviceList = data;
       setDevices(deviceList);
 
       if (deviceList.length > 0) {
-        // Jika ada device, pilih yang pertama sebagai default (atau dari localstorage)
         const savedId = localStorage.getItem("selectedDeviceId");
         const found = deviceList.find((d) => d.id.toString() === savedId);
         setCurrentDevice(found || deviceList[0]);
         setShowDeviceModal(false);
       } else {
-        // Jika TIDAK ADA device, WAJIBKAN muncul modal
         setCurrentDevice(null);
         setShowDeviceModal(true);
       }
@@ -74,26 +95,56 @@ export const DeviceProvider = ({ children }) => {
     }
   };
 
-  // 3. Tambah Device Baru
+  // 3. Tambah Device Baru (DIPERBAIKI)
   const addDevice = async (deviceName) => {
-    if (!user) return;
-    try {
-      const res = await axios.post(`${API_URL}/devices`, {
-        user_id: user.id,
-        device_name: deviceName,
-      });
-      const newDevice = res.data;
+    if (!user) return false;
 
+    // --- LOGIKA HARDWARE ID ---
+    let hardwareIdToUse = null;
+
+    // A. Coba deteksi otomatis dulu
+    const detected = await autoDetectDevice();
+
+    if (detected) {
+      hardwareIdToUse = detected;
+    } else {
+      // B. Jika tidak ada kamera terdeteksi, buat ID acak (Fallback)
+      hardwareIdToUse =
+        "DEV-" + Math.random().toString(36).substr(2, 9).toUpperCase();
+      console.log("Menggunakan Random ID:", hardwareIdToUse);
+    }
+
+    try {
+      // Simpan langsung ke Supabase (Bypass Backend RLS issue)
+      const { data, error } = await supabase
+        .from("devices")
+        .insert([
+          {
+            user_id: user.id,
+            device_name: deviceName,
+            is_active: true,
+            hardware_id: hardwareIdToUse,
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      const newDevice = data;
+
+      // Update state lokal
       const newDevicesList = [...devices, newDevice];
       setDevices(newDevicesList);
-      setCurrentDevice(newDevice); // Auto select yang baru
+      setCurrentDevice(newDevice);
 
       // Simpan ke local storage
       localStorage.setItem("selectedDeviceId", newDevice.id);
 
       return true;
     } catch (err) {
-      console.error(err);
+      console.error("Gagal menambah device:", err.message);
+      alert("Gagal menyimpan: " + err.message);
       return false;
     }
   };
@@ -118,6 +169,9 @@ export const DeviceProvider = ({ children }) => {
         showDeviceModal,
         setShowDeviceModal,
         user,
+        activeDeviceId,
+        autoDetectDevice,
+        API_URL,
       }}
     >
       {children}

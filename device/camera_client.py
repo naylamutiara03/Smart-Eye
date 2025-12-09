@@ -2,15 +2,40 @@ import cv2
 import base64
 import requests
 import time
+import uuid
+import os
+import json
 
-# Pastikan URL mengarah ke backend Anda
 API_URL = "http://127.0.0.1:5000/process_frame"
+CONFIG_FILE = "device_config.json"
+
+def get_or_create_hardware_id():
+    # Cek apakah ID sudah pernah dibuat sebelumnya
+    if os.path.exists(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, 'r') as f:
+                config = json.load(f)
+                if 'hardware_id' in config:
+                    return config['hardware_id']
+        except:
+            pass # Jika error, buat baru
+            
+    # Buat ID baru jika belum ada
+    new_id = str(uuid.uuid4())
+    with open(CONFIG_FILE, 'w') as f:
+        json.dump({'hardware_id': new_id}, f)
+    return new_id
 
 def run_camera():
+    # 1. Dapatkan ID Unik Perangkat ini
+    hardware_id = get_or_create_hardware_id()
+    
     cap = cv2.VideoCapture(0)
-    print("--- KAMERA AKTIF ---")
-    print(f"Mengirim data ke: {API_URL}")
-    print("Jangan tutup window ini agar deteksi terus berjalan.")
+    print("="*40)
+    print(f"   SMART-EYE CAMERA CLIENT")
+    print(f"   ID: {hardware_id}")
+    print(f"   Target: {API_URL}")
+    print("="*40)
 
     while True:
         ret, frame = cap.read()
@@ -18,33 +43,28 @@ def run_camera():
             print("Gagal membaca kamera")
             break
             
-        # Resize frame agar pengiriman lebih ringan (opsional)
+        # Resize frame agar pengiriman lebih ringan
         frame = cv2.resize(frame, (480, 360))
-        
         _, buffer = cv2.imencode('.jpg', frame)
         jpg_as_text = base64.b64encode(buffer).decode('utf-8')
         
-        # Kirim frame ke backend
+        # Kirim frame ke backend BESERTA hardware_id
         try:
-            # Kita tambahkan mode 'strict' atau 'focus' jika mau (opsional)
             payload = {
                 'image': f"data:image/jpeg;base64,{jpg_as_text}",
+                'hardware_id': hardware_id,
                 'mode': 'focus' 
             }
             
             response = requests.post(API_URL, json=payload, timeout=0.5)
-            
-            # Print feedback dari server (untuk debugging di terminal)
-            data = response.json()
-            print(f"\rStatus: {data.get('message')} | Blinks: {data.get('total_blinks')}", end="")
+            print(".", end="", flush=True)
             
         except requests.exceptions.ConnectionError:
             print("\r[!] Gagal koneksi ke server...", end="")
         except Exception as e:
             print(f"\n[!] Error: {e}")
             
-        # Kirim sekitar 10-15 FPS agar tidak memberatkan server
-        time.sleep(0.08)
+        time.sleep(0.1) # 10 FPS
 
     cap.release()
 

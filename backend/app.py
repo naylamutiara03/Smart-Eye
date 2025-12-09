@@ -1,7 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import cv2, dlib, numpy as np, base64, re, time
-from datetime import datetime, timedelta, UTC
+# FIX: Pastikan mengimpor timezone untuk digunakan pada datetime.now()
+from datetime import datetime, timedelta, timezone 
 from supabase_client import supabase
 from collections import deque
 
@@ -12,7 +13,7 @@ CORS(app)
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
-# --- Variabel Global Statis ---
+# --- Variabel Global Statis (Digunakan oleh /process_frame) ---
 BASE_EAR_THRESHOLD = 0.20
 TOTAL_BLINKS = 0
 LAST_BLINK_TIME = time.time()
@@ -20,11 +21,13 @@ START_TIME = None
 BLINK_TIMESTAMPS = deque()
 EYE_CLOSED = False
 
+# Global state untuk live stream (untuk diakses oleh frontend)
 LATEST_STREAM_DATA = {
     "image": None,
     "blink_count": 0,
     "blink_rate": 0,
     "message": "Menunggu kamera...",
+    "hardware_id": None,
     "last_update": 0
 }
 
@@ -68,7 +71,7 @@ def process_frame():
     global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS, BASE_EAR_THRESHOLD, LATEST_STREAM_DATA
 
     data = request.get_json()
-
+    hardware_id = data.get('hardware_id')
     detection_mode = data.get('mode', 'focus')
 
     if detection_mode == 'strict':
@@ -154,6 +157,7 @@ def process_frame():
             "blink_count": blink_count,
             "blink_rate": blink_rate,
             "message": message,
+            "hardware_id": hardware_id,
             "last_update": time.time()
         }
 
@@ -173,7 +177,7 @@ def process_frame():
 
 @app.route('/stream/latest', methods=['GET'])
 def get_latest_stream():
-    # Cek apakah data masih "segar" (misal update terakhir < 5 detik lalu)
+    # Cek apakah data masih "segar" (update terakhir < 5 detik lalu)
     if time.time() - LATEST_STREAM_DATA['last_update'] > 5:
         return jsonify({"status": "offline", "message": "Kamera tidak aktif/terputus."})
     
@@ -200,21 +204,27 @@ def register_device():
     data = request.get_json()
     user_id = data.get('user_id')
     device_name = data.get('device_name')
+    hardware_id = data.get('hardware_id') 
 
-    if not user_id or not device_name:
-        return jsonify({"error": "Data incomplete"}), 400
+    if not user_id or not device_name or not hardware_id:
+        return jsonify({"error": "Data incomplete (missing user_id, device_name, or hardware_id)"}), 400
 
     try:
         new_device = {
             "user_id": user_id,
             "device_name": device_name,
             "is_active": True,
-            "created_at": datetime.now(UTC).isoformat(),
-            "updated_date": datetime.now(UTC).isoformat()
+            "hardware_id": hardware_id,
+            # FIX: Ganti UTC dengan timezone.utc
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "updated_date": datetime.now(timezone.utc).isoformat()
         }
         response = supabase.table("devices").insert(new_device).execute()
         return jsonify(response.data[0])
     except Exception as e:
+        print(f"Error registering device: {e}")
+        if "unique constraint" in str(e).lower():
+             return jsonify({"error": "Perangkat ini sudah didaftarkan."}), 409
         return jsonify({"error": str(e)}), 500
 
 
@@ -227,8 +237,13 @@ def stop_detection():
     current_user_id = data.get('user_id')
     current_device_id = data.get('device_id')
     current_detection_mode = data.get('detection_mode', 'focus')
+    
+    # Ambil statistik akhir yang dikirim dari Frontend
+    client_total_blinks = data.get('total_blinks')
+    client_blink_rate = data.get('blink_rate')
 
     if not current_user_id:
+        # Reset globals
         TOTAL_BLINKS = 0
         START_TIME = None
         BLINK_TIMESTAMPS.clear()
@@ -238,42 +253,50 @@ def stop_detection():
     frontend_start_time = data.get('start_time')
     frontend_end_time = data.get('end_time')
     duration_sec = 0
-    blink_per_minute = 0.0
+    # Gunakan rate dari client (jika ada), atau 0.0
+    blink_per_minute = client_blink_rate if client_blink_rate is not None else 0.0
 
     try:
+        # Hitung durasi sesi
         if frontend_start_time and frontend_end_time:
             start_dt = datetime.fromisoformat(frontend_start_time.replace('Z', '+00:00'))
             end_dt = datetime.fromisoformat(frontend_end_time.replace('Z', '+00:00'))
             duration_sec = int((end_dt - start_dt).total_seconds())
-        elif START_TIME:
-            duration_sec = int(time.time() - START_TIME)
         else:
             duration_sec = 0
     except Exception:
-        duration_sec = int(time.time() - (START_TIME or time.time()))
+        duration_sec = 0
 
-    blink_per_minute = round((TOTAL_BLINKS / (duration_sec / 60)), 2) if duration_sec > 1 else 0.0
+    # Gunakan total blink dari client, jika tidak ada, pakai global
+    actual_total_blinks = client_total_blinks if client_total_blinks is not None else TOTAL_BLINKS
+    
+    # Hitung BPM ulang jika durasi dan blink count tersedia dan client tidak mengirim rate
+    if duration_sec > 1 and actual_total_blinks > 0 and client_blink_rate is None:
+        blink_per_minute = round((actual_total_blinks / (duration_sec / 60)), 2) 
 
     warning_limit = 8 if current_detection_mode == 'strict' else 10
-    warning_triggered = TOTAL_BLINKS == 0 or blink_per_minute < warning_limit
+    warning_triggered = actual_total_blinks == 0 or blink_per_minute < warning_limit
 
     record = {
-        "blink_count": TOTAL_BLINKS,
+        "blink_count": actual_total_blinks,
         "stare_duration_sec": duration_sec,
         "blink_per_minute": int(blink_per_minute),
         "warning_triggered": warning_triggered,
         "note": f"Mode: {current_detection_mode.upper()}",
-        "captured_at": datetime.now(UTC).isoformat(),
+        # FIX: Ganti UTC dengan timezone.utc
+        "captured_at": datetime.now(timezone.utc).isoformat(), 
         "user_id": current_user_id,
         "device_id": current_device_id,
         "detection_mode": current_detection_mode,
-        "created_at": datetime.now(UTC).isoformat()
+        # FIX: Ganti UTC dengan timezone.utc
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
 
-    if duration_sec > 1 and TOTAL_BLINKS >= 0:
+    if duration_sec > 1 and actual_total_blinks >= 0:
         try:
             supabase.table("blink_history").insert(record).execute()
         except Exception as e:
+            print(f"SUPABASE SAVE ERROR in stop_detection: {e}") 
             TOTAL_BLINKS = 0
             START_TIME = None
             BLINK_TIMESTAMPS.clear()
@@ -282,8 +305,11 @@ def stop_detection():
             return jsonify({"error": f"Gagal menyimpan data ke Supabase: {str(e)}"}), 500
         
     if current_device_id:
-        supabase.table("devices").update({"last_seen_at": datetime.now(UTC).isoformat()}).eq("id", current_device_id).execute()
+        # Update last_seen_at
+        # FIX: Ganti UTC dengan timezone.utc
+        supabase.table("devices").update({"last_seen_at": datetime.now(timezone.utc).isoformat()}).eq("id", current_device_id).execute()
 
+    # Reset globals setelah sesi selesai
     TOTAL_BLINKS = 0
     START_TIME = None
     BLINK_TIMESTAMPS.clear()
@@ -299,4 +325,4 @@ def stop_detection():
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
