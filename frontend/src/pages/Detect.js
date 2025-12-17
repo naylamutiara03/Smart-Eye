@@ -96,7 +96,7 @@ const RateIcon = (props) => (
   </svg>
 );
 
-// --- KOMPONEN BARU: MODE TOGGLE SWITCH ---
+// --- Mode Toggle Switch ---
 const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
   const isStrict = detectionMode === "strict";
   const color = isStrict ? "#ef4444" : "#10b981"; // Merah untuk Strict, Hijau untuk Fokus
@@ -112,7 +112,7 @@ const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
     boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
     marginTop: "1.5rem",
     marginBottom: "1rem",
-    opacity: isDetecting ? 0.6 : 1, // Kurangi opacity jika sedang mendeteksi (agar tidak bisa diubah)
+    opacity: isDetecting ? 0.6 : 1,
     pointerEvents: isDetecting ? "none" : "auto",
   };
 
@@ -141,18 +141,10 @@ const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
   return (
     <div style={toggleStyle}>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <span
-          style={{ fontWeight: "700", color: isStrict ? color : "#1f2937" }}
-        >
+        <span style={{ fontWeight: "700", color: isStrict ? color : "#1f2937" }}>
           Mode Deteksi: {isStrict ? "Strict" : "Fokus"}
         </span>
-        <span
-          style={{
-            fontSize: "0.75rem",
-            color: "#6b7280",
-            marginTop: "0.25rem",
-          }}
-        >
+        <span style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.25rem" }}>
           {isStrict
             ? "Peringatan lebih sensitif dan sering."
             : "Peringatan standar, cocok untuk pekerjaan umum."}
@@ -168,16 +160,15 @@ const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
     </div>
   );
 };
-// ---------------------------------------------
 
 function Detect() {
   const [isDetecting, setIsDetecting] = useState(false);
   const [stats, setStats] = useState({ total_blinks: 0, blink_rate: 0 });
   const [warning, setWarning] = useState("");
   const [warningText, setWarningText] = useState("");
+  const warningTextRef = useRef(""); // biar bunyi warning tidak spam
   const [startTime, setStartTime] = useState(null);
   const [showHistoryButton, setShowHistoryButton] = useState(false);
-  // State baru untuk menyimpan gambar stream dari backend
   const [imageSrc, setImageSrc] = useState(null);
 
   const { currentDevice } = useDevice();
@@ -193,6 +184,11 @@ function Detect() {
   const beep = useRef(
     new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg")
   );
+
+  // Status kamera + detectionRunning
+  
+  const [isCameraActive, setIsCameraActive] = useState(false);
+  const [detectionRunning, setDetectionRunning] = useState(false);
 
   useEffect(() => {
     document.title = "Detect";
@@ -216,14 +212,36 @@ function Detect() {
 
     return () => {
       window.removeEventListener("resize", handleResize);
-      // Panggil stop tanpa save saat unmount
       if (isDetecting) {
         clearInterval(intervalRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  // ---------------------------------------------
+  
+  // Cek status kamera (polling 5 detik)
+ 
+  useEffect(() => {
+    let mounted = true;
+
+    const checkCameraStatus = async () => {
+      try {
+        const res = await axios.get(`${API_URL}/stream/latest`, { timeout: 2000 });
+        const online = res?.data?.status === "online";
+        if (mounted) setIsCameraActive(online);
+      } catch (err) {
+        if (mounted) setIsCameraActive(false);
+      }
+    };
+
+    checkCameraStatus();
+    const camInterval = setInterval(checkCameraStatus, 5000);
+
+    return () => {
+      mounted = false;
+      clearInterval(camInterval);
+    };
+  }, []);
 
   const showNotification = (text) => {
     try {
@@ -240,87 +258,91 @@ function Detect() {
     }
   };
 
-  // --- MODIFIKASI: START DETECTION (POLLING MODE) ---
+  // --- START DETECTION (POLLING MODE) ---
   const startDetection = async () => {
     try {
+      // Cek kamera aktif dulu
+      if (!isCameraActive) {
+        setWarning("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
+        setWarningText("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
+        warningTextRef.current = "⚠️ Kamera offline. Pastikan camera_client.py berjalan.";
+        return;
+      }
+
       const {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session) {
         setWarning("Anda harus login untuk memulai deteksi.");
+        setWarningText("Anda harus login untuk memulai deteksi.");
+        warningTextRef.current = "Anda harus login untuk memulai deteksi.";
         return;
       }
 
-      // Mulai state
       setStartTime(new Date().toISOString());
       setIsDetecting(true);
+      setDetectionRunning(true); // Sinkron
       setWarning("");
       setWarningText("");
+      warningTextRef.current = "";
       setImageSrc(null);
 
-      // Interval polling ke backend (bukan akses kamera lokal)
       intervalRef.current = setInterval(async () => {
         try {
-          // Ambil data terbaru dari memori server
           const res = await axios.get(`${API_URL}/stream/latest`);
 
           if (res.data.status === "online") {
             const data = res.data.data;
 
-            // Update Gambar
             setImageSrc(data.image);
 
-            // Update Stats
             setStats({
               total_blinks: data.blink_count ?? 0,
               blink_rate: data.blink_rate ?? 0,
             });
 
-            // Handle Pesan Peringatan dari Backend
             const msg = data.message || "";
             if (msg.includes("⚠️")) {
               setWarning(msg);
-              // Mainkan bunyi hanya sekali per peringatan baru (opsional logic)
-              if (warningText !== msg) {
+
+              if (warningTextRef.current !== msg) {
+                warningTextRef.current = msg;
+                setWarningText(msg);
                 beep.current && beep.current.play().catch(() => {});
                 showNotification(msg);
               }
             } else if (msg.includes("✅")) {
-              // Normal
+              // normal
             } else {
-              if (!warningText.startsWith("✅")) {
+              // clear warning jika bukan warning
+              if (!warningTextRef.current.startsWith("✅")) {
                 setWarning("");
               }
             }
           } else {
-            // Jika offline
-            setWarning(
-              "⚠️ Kamera offline. Pastikan camera_client.py berjalan."
-            );
+            setWarning("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
           }
         } catch (err) {
           console.error("Error polling stream:", err);
         }
-      }, 100); // Poll setiap 100ms (10 FPS)
+      }, 100);
     } catch (err) {
       console.error("startDetection error:", err);
       setWarning("Gagal memulai sesi: " + (err?.message || err));
     }
   };
 
-  // --- MODIFIKASI: STOP DETECTION ---
+  // --- STOP DETECTION ---
   const stopDetection = async (saveRecord = true) => {
-    // 1. Hentikan interval polling
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    // 2. Update State UI
     setIsDetecting(false);
-    setImageSrc(null); // Clear gambar
+    setDetectionRunning(false); // Sinkron
+    setImageSrc(null);
 
-    // 3. Ambil User ID dari Session
     let userId = null;
     try {
       const {
@@ -333,10 +355,8 @@ function Detect() {
       console.error("Gagal mendapatkan sesi Supabase:", e);
     }
 
-    // 4. Ambil Device ID (Opsional, jika menggunakan context)
     const deviceId = currentDevice?.id || null;
 
-    // 5. Siapkan Payload Data (Gunakan stats terakhir dari polling)
     const payload = {
       total_blinks: stats.total_blinks,
       blink_rate: stats.blink_rate,
@@ -347,16 +367,9 @@ function Detect() {
       detection_mode: detectionMode,
     };
 
-    // 6. Reset Statistik Lokal
     setStats({ total_blinks: 0, blink_rate: 0 });
 
-    // 7. Kirim Data ke Backend untuk disimpan
     if (saveRecord && payload.user_id) {
-      if (!deviceId) {
-        // Warning opsional jika device belum dipilih, tapi tetap simpan
-        // setWarning("⚠️ Perangkat tidak dipilih...");
-      }
-
       try {
         const res = await axios.post(`${API_URL}/stop_detection`, payload, {
           timeout: 8000,
@@ -367,14 +380,14 @@ function Detect() {
         } (durasi ${res.data.duration ?? "?"} detik)`;
 
         const historyButtonHtml = `
-          <a href="/history?user_id=${userId}" 
+          <a href="/history?user_id=${userId}"
             style="
-              background-color: #10b981; 
-              color: white; 
-              padding: 0.25rem 0.75rem; 
-              border-radius: 0.375rem; 
-              text-decoration: none; 
-              font-weight: 600; 
+              background-color: #10b981;
+              color: white;
+              padding: 0.25rem 0.75rem;
+              border-radius: 0.375rem;
+              text-decoration: none;
+              font-weight: 600;
               margin-left: 1rem;
               display: inline-block;
             ">
@@ -384,18 +397,18 @@ function Detect() {
 
         setWarning(`${successMessage}${historyButtonHtml}`);
         setWarningText(successMessage);
+        warningTextRef.current = successMessage;
         setShowHistoryButton(true);
       } catch (err) {
         console.error("Error stopping detection:", err);
         setWarning(
-          `Error saat menghentikan sesi: ${
-            err?.message || err
-          }. Data mungkin tidak tersimpan.`
+          `Error saat menghentikan sesi: ${err?.message || err}. Data mungkin tidak tersimpan.`
         );
       }
     } else {
       setWarning("");
       setWarningText("");
+      warningTextRef.current = "";
       setShowHistoryButton(false);
 
       if (saveRecord && !payload.user_id) {
@@ -404,13 +417,13 @@ function Detect() {
     }
   };
 
-  // --- Styles (diperbarui untuk menggunakan isMobileView) ---
+  // --- Styles ---
   const primaryColor = "#3b82f6";
   const secondaryBg = "#e0f2fe";
   const mainContainerStyle = {
     fontFamily: "Inter, sans-serif",
     minHeight: "100vh",
-    backgroundColor: "#fffff",
+    backgroundColor: "#ffffff",
     padding: "2rem 1rem",
     width: "100%",
     display: "flex",
@@ -418,7 +431,6 @@ function Detect() {
     alignItems: "flex-start",
   };
 
-  // LOGIC RESPONSIVITAS DI SINI:
   const contentWrapperStyle = {
     display: "flex",
     flexDirection: isMobileView ? "column" : "row",
@@ -469,7 +481,6 @@ function Detect() {
     height: "auto",
     aspectRatio: "4 / 3",
     objectFit: "cover",
-    // transform: "scaleX(-1)", // Mirror tidak diperlukan jika gambar dari backend sudah benar
     borderRadius: "0.75rem",
     backgroundColor: "#374151",
   };
@@ -505,22 +516,20 @@ function Detect() {
     ...buttonBaseStyle,
     backgroundColor: primaryColor,
     color: "white",
+    opacity: !isCameraActive ? 0.6 : 1,
   };
+
   const stopButtonStyle = {
     ...buttonBaseStyle,
     backgroundColor: "#ef4444",
     color: "white",
   };
-  // ---------------------------------------------
 
   return (
     <div className="page-content">
       <div className="container mb-5">
         <div style={mainContainerStyle}>
           <div className="flex flex-col items-center w-full">
-            {/* ========================================================== */}
-            {/* >>> PERUBAHAN BARU: Tambahkan Judul di atas Card <<< */}
-            {/* ========================================================== */}
             <h1
               style={{
                 fontSize: isMobileView ? "2rem" : "2.5rem",
@@ -532,7 +541,6 @@ function Detect() {
             >
               Detect Your Eyes 👁️
             </h1>
-            {/* ========================================================== */}
 
             <div style={contentWrapperStyle}>
               {/* Panel Kiri: Kamera & Kontrol */}
@@ -556,22 +564,17 @@ function Detect() {
                     marginBottom: "1.5rem",
                     borderRadius: "0.75rem",
                     overflow: "hidden",
-                    minHeight: "300px", // Tambahan agar tidak collapse
+                    minHeight: "300px",
                     backgroundColor: "#f3f4f6",
                   }}
                 >
-                  {/* MODIFIKASI: Menggunakan IMG tag untuk stream dari backend */}
                   {isDetecting && imageSrc ? (
                     <img
                       src={imageSrc}
                       alt="Live Stream"
-                      style={{
-                        ...videoStyle,
-                        display: "block",
-                      }}
+                      style={{ ...videoStyle, display: "block" }}
                     />
                   ) : (
-                    // Placeholder saat kamera mati atau stream belum masuk
                     <div style={videoPlaceholderStyle}>
                       <CameraIcon
                         style={{
@@ -590,7 +593,9 @@ function Detect() {
                       >
                         {isDetecting
                           ? "Menunggu koneksi kamera..."
-                          : "Kamera dinonaktifkan"}
+                          : isCameraActive
+                          ? "Kamera siap"
+                          : "Kamera offline"}
                       </p>
                       <p
                         style={{
@@ -601,35 +606,34 @@ function Detect() {
                       >
                         {isDetecting
                           ? "Pastikan camera_client.py berjalan"
-                          : "Tekan Mulai Deteksi untuk mengaktifkan."}
+                          : isCameraActive
+                          ? "Tekan Mulai Deteksi untuk memulai."
+                          : "Jalankan camera_client.py lalu refresh."}
                       </p>
                     </div>
                   )}
                 </div>
 
-                <div
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "1rem",
-                  }}
-                >
+                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
                   {!isDetecting ? (
                     <button
                       onClick={startDetection}
                       style={startButtonStyle}
-                      onMouseEnter={(e) =>
-                        (e.currentTarget.style.backgroundColor = "#2563eb")
-                      }
-                      onMouseLeave={(e) =>
-                        (e.currentTarget.style.backgroundColor = primaryColor)
-                      }
-                      onMouseDown={(e) =>
-                        (e.currentTarget.style.transform = "scale(0.99)")
-                      }
-                      onMouseUp={(e) =>
-                        (e.currentTarget.style.transform = "scale(1)")
-                      }
+                      disabled={!isCameraActive || detectionRunning}
+                      onMouseEnter={(e) => {
+                        if (!e.currentTarget.disabled)
+                          e.currentTarget.style.backgroundColor = "#2563eb";
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = primaryColor;
+                      }}
+                      onMouseDown={(e) => {
+                        if (!e.currentTarget.disabled)
+                          e.currentTarget.style.transform = "scale(0.99)";
+                      }}
+                      onMouseUp={(e) => {
+                        e.currentTarget.style.transform = "scale(1)";
+                      }}
                     >
                       <PlayIcon
                         style={{
@@ -638,7 +642,7 @@ function Detect() {
                           marginRight: "0.5rem",
                         }}
                       />
-                      Mulai Deteksi
+                      {detectionRunning ? "Deteksi Berjalan..." : "Mulai Deteksi"}
                     </button>
                   ) : (
                     <button
@@ -653,9 +657,7 @@ function Detect() {
                       onMouseDown={(e) =>
                         (e.currentTarget.style.transform = "scale(0.99)")
                       }
-                      onMouseUp={(e) =>
-                        (e.currentTarget.style.transform = "scale(1)")
-                      }
+                      onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
                     >
                       <StopIcon
                         style={{
@@ -669,7 +671,6 @@ function Detect() {
                   )}
                 </div>
 
-                {/* Warning / Notification Area */}
                 {(warning || warningText) && (
                   <div
                     style={{
@@ -747,32 +748,30 @@ function Detect() {
                   Statistik Real-time
                 </h2>
 
-                <p
-                  style={{
-                    color: "#6b7280",
-                    fontSize: "0.875rem",
-                    marginBottom: "0.5rem",
-                  }}
-                >
-                  Status deteksi:{" "}
-                  {isDetecting ? (
-                    <span style={{ color: "#10b981", fontWeight: "bold" }}>
-                      AKTIF
-                    </span>
+                {/* ✅ TAMBAHAN: Status Kamera */}
+                <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+                  Status kamera:{" "}
+                  {isCameraActive ? (
+                    <span style={{ color: "#10b981", fontWeight: "bold" }}>AKTIF</span>
                   ) : (
-                    <span style={{ color: "#f97316", fontWeight: "bold" }}>
-                      TIDAK AKTIF
-                    </span>
+                    <span style={{ color: "#ef4444", fontWeight: "bold" }}>TIDAK AKTIF</span>
                   )}
                 </p>
 
-                {/* --- KOMPONEN MODE TOGGLE BARU DI SINI --- */}
+                <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+                  Status deteksi:{" "}
+                  {isDetecting ? (
+                    <span style={{ color: "#10b981", fontWeight: "bold" }}>AKTIF</span>
+                  ) : (
+                    <span style={{ color: "#f97316", fontWeight: "bold" }}>TIDAK AKTIF</span>
+                  )}
+                </p>
+
                 <ModeToggle
                   detectionMode={detectionMode}
                   setDetectionMode={setDetectionMode}
                   isDetecting={isDetecting}
                 />
-                {/* ------------------------------------------- */}
 
                 <div style={statsGridStyle}>
                   <div style={statItemStyle}>
@@ -856,13 +855,7 @@ function Detect() {
               </div>
             </div>
 
-            <p
-              style={{
-                marginTop: "1rem",
-                fontSize: "0.75rem",
-                color: "#9ca3af",
-              }}
-            >
+            <p style={{ marginTop: "1rem", fontSize: "0.75rem", color: "#9ca3af" }}>
               API Endpoint: {API_URL}
             </p>
           </div>
