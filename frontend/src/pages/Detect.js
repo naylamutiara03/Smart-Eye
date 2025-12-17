@@ -168,7 +168,7 @@ function Detect() {
   const [warningText, setWarningText] = useState("");
   const warningTextRef = useRef(""); // biar bunyi warning tidak spam
   const [startTime, setStartTime] = useState(null);
-  const [showHistoryButton, setShowHistoryButton] = useState(false);
+  const [, setShowHistoryButton] = useState(false);
   const [imageSrc, setImageSrc] = useState(null);
 
   const { currentDevice } = useDevice();
