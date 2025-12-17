@@ -1,20 +1,19 @@
-import React, { useLayoutEffect, useRef, useState, useEffect } from "react";
+import React, {
+  useLayoutEffect,
+  useRef,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import { Link, NavLink, useNavigate } from "react-router-dom";
 import { gsap } from "gsap";
 import { supabase } from "../supabaseClient";
 import "./CardNav.css";
-import {
-  Home,
-  Camera,
-  History,
-  LogOut,
-  Monitor,
-  PlusCircle,
-} from "lucide-react";
+import { Home, Camera, History, LogOut, Monitor } from "lucide-react";
 import { useDevice } from "../contexts/DeviceContext";
 
 const CardNavLink = React.forwardRef(
-  ({ to, label, icon, onClick, style, className }, ref) => (
+  ({ to, label, icon, onClick, style, className = "" }, ref) => (
     <NavLink
       ref={ref}
       to={to}
@@ -38,6 +37,7 @@ function CardNavbar() {
   const [showModal, setShowModal] = useState(false);
   const [isHamburgerOpen, setIsHamburgerOpen] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+
   const navRef = useRef(null);
   const cardsRef = useRef([]);
   const tlRef = useRef(null);
@@ -46,64 +46,70 @@ function CardNavbar() {
   const { devices, currentDevice, selectDevice, setShowDeviceModal, user } =
     useDevice();
 
-  const handleDeviceChange = (e) => {
-    const val = e.target.value;
-    if (val === "ADD_NEW") {
-      setShowDeviceModal(true);
-    } else {
-      selectDevice(val);
-    }
-  };
+  const handleDeviceChange = useCallback(
+    (e) => {
+      const val = e.target.value;
+      if (val === "ADD_NEW") {
+        setShowDeviceModal(true);
+      } else {
+        selectDevice(val);
+      }
+    },
+    [selectDevice, setShowDeviceModal]
+  );
 
-  const navItems = [
-    {
-      to: "/",
-      label: "Home",
-      icon: <Home />,
-      bgColor: "#e0f7fa",
-      textColor: "#006064",
-    },
-    {
-      to: "/detect",
-      label: "Detect",
-      icon: <Camera />,
-      bgColor: "#fff3e0",
-      textColor: "#e65100",
-    },
-    {
-      to: "/history",
-      label: "History",
-      icon: <History />,
-      bgColor: "#e8f5e9",
-      textColor: "#2e7d32",
-    },
-    {
-      to: "/logout",
-      label: "Logout",
-      icon: <LogOut />,
-      bgColor: "#ffebee",
-      textColor: "#c62828",
-      isLogout: true,
-    },
-  ];
+  const navItems = useMemo(
+    () => [
+      {
+        to: "/",
+        label: "Home",
+        icon: <Home />,
+        bgColor: "#e0f7fa",
+        textColor: "#006064",
+      },
+      {
+        to: "/detect",
+        label: "Detect",
+        icon: <Camera />,
+        bgColor: "#fff3e0",
+        textColor: "#e65100",
+      },
+      {
+        to: "/history",
+        label: "History",
+        icon: <History />,
+        bgColor: "#e8f5e9",
+        textColor: "#2e7d32",
+      },
+      {
+        to: "/logout",
+        label: "Logout",
+        icon: <LogOut />,
+        bgColor: "#ffebee",
+        textColor: "#c62828",
+        isLogout: true,
+      },
+    ],
+    []
+  );
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     try {
       setShowModal(false);
       await supabase.auth.signOut();
       navigate("/login");
     } catch (error) {
-      console.error("Gagal logout:", error.message);
+      console.error("Gagal logout:", error?.message || error);
     }
-  };
+  }, [navigate]);
 
-  const openModal = () => setShowModal(true);
-  const closeModal = () => setShowModal(false);
+  const openModal = useCallback(() => setShowModal(true), []);
+  const closeModal = useCallback(() => setShowModal(false), []);
 
-  // ... (GSAP Animations tetap sama, saya skip untuk ringkas, copy paste logika GSAP sebelumnya) ...
-  const calculateHeight = () => {
+  const calculateHeight = useCallback(() => {
     const navEl = navRef.current;
     if (!navEl) return 55;
+
     const isMobile = window.matchMedia("(max-width: 768px)").matches;
     if (isMobile) {
       const topBar = 55;
@@ -112,63 +118,75 @@ function CardNavbar() {
       return topBar + contentHeight + padding;
     }
     return 260;
-  };
+  }, [navItems.length]);
 
-  const createTimeline = () => {
+  const createTimeline = useCallback(() => {
     const navEl = navRef.current;
     if (!navEl) return null;
+
     gsap.set(navEl, { height: 55, overflow: "hidden" });
     gsap.set(cardsRef.current, { y: 50, opacity: 0 });
+
     const tl = gsap.timeline({ paused: true });
+
     tl.to(navEl, {
       height: calculateHeight,
       duration: 0.4,
       ease: "power3.out",
     });
+
     tl.to(
       cardsRef.current,
-      { y: 0, opacity: 1, duration: 0.4, ease: "power3.out", stagger: 0.08 },
+      {
+        y: 0,
+        opacity: 1,
+        duration: 0.4,
+        ease: "power3.out",
+        stagger: 0.08,
+      },
       "-=0.1"
     );
+
     return tl;
-  };
+  }, [calculateHeight]);
 
   useLayoutEffect(() => {
     const tl = createTimeline();
     tlRef.current = tl;
+
     return () => {
       tl?.kill();
       tlRef.current = null;
     };
-  }, [navItems.length]);
+  }, [createTimeline]);
 
   useLayoutEffect(() => {
     const handleResize = () => {
       if (!tlRef.current) return;
+
+      // rebuild timeline when resized to keep heights correct
+      tlRef.current.kill();
+      const newTl = createTimeline();
+
+      if (!newTl) return;
+
       if (isExpanded) {
         const newHeight = calculateHeight();
         gsap.set(navRef.current, { height: newHeight });
-        tlRef.current.kill();
-        const newTl = createTimeline();
-        if (newTl) {
-          newTl.progress(1);
-          tlRef.current = newTl;
-        }
-      } else {
-        tlRef.current.kill();
-        const newTl = createTimeline();
-        if (newTl) {
-          tlRef.current = newTl;
-        }
+        newTl.progress(1); // keep opened state
       }
+
+      tlRef.current = newTl;
     };
+
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
-  }, [isExpanded, navItems.length]);
+  }, [isExpanded, createTimeline, calculateHeight]);
 
-  const toggleMenu = () => {
+  const toggleMenu = useCallback(() => {
     const tl = tlRef.current;
     if (!tl) return;
+
     if (!isExpanded) {
       setIsHamburgerOpen(true);
       setIsExpanded(true);
@@ -182,25 +200,32 @@ function CardNavbar() {
       tl.eventCallback("onReverseComplete", onReverseComplete);
       tl.reverse();
     }
-  };
+  }, [isExpanded]);
 
-  const handleNavLinkClick = () => {
+  const handleNavLinkClick = useCallback(() => {
     if (isExpanded) toggleMenu();
-  };
-  const setCardRef = (i) => (el) => {
-    if (el) cardsRef.current[i] = el;
-  };
+  }, [isExpanded, toggleMenu]);
 
-  const Logo = () => (
-    <Link to="/" style={{ textDecoration: "none", color: "#111" }}>
-      <span className="fw-bold" style={{ fontSize: "1.25rem" }}>
-        EyeCare 👁️
-      </span>
-    </Link>
+  const setCardRef = useCallback(
+    (i) => (el) => {
+      if (el) cardsRef.current[i] = el;
+    },
+    []
+  );
+
+  const Logo = useCallback(
+    () => (
+      <Link to="/" style={{ textDecoration: "none", color: "#111" }}>
+        <span className="fw-bold" style={{ fontSize: "1.25rem" }}>
+          EyeCare 👁️
+        </span>
+      </Link>
+    ),
+    []
   );
 
   return (
-    <div className={`card-nav-container`}>
+    <div className="card-nav-container">
       <nav
         ref={navRef}
         className={`card-nav ${isExpanded ? "open" : ""}`}
@@ -210,7 +235,7 @@ function CardNavbar() {
           <div className="logo-container d-flex align-items-center gap-3">
             <Logo />
 
-            {/* --- DEVICE SELECTOR (Desktop/Mobile visible) --- */}
+            {/* --- DEVICE SELECTOR --- */}
             {user && (
               <div className="d-flex align-items-center bg-light rounded px-2 py-1 border">
                 <Monitor
@@ -247,6 +272,11 @@ function CardNavbar() {
             className={`hamburger-menu ${isHamburgerOpen ? "open" : ""}`}
             onClick={toggleMenu}
             style={{ color: "#111" }}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") toggleMenu();
+            }}
           >
             <div className="hamburger-line" />
             <div className="hamburger-line" />
@@ -262,6 +292,11 @@ function CardNavbar() {
                 className="nav-card navlink-card"
                 style={{ backgroundColor: item.bgColor, color: item.textColor }}
                 onClick={openModal}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") openModal();
+                }}
               >
                 <div className="nav-card-label d-flex align-items-center">
                   {React.cloneElement(item.icon, {
@@ -305,10 +340,7 @@ function CardNavbar() {
                 >
                   Batal
                 </button>
-                <button
-                  className="btn btn-danger btn-sm"
-                  onClick={handleLogout}
-                >
+                <button className="btn btn-danger btn-sm" onClick={handleLogout}>
                   Ya, Logout
                 </button>
               </div>
