@@ -1,19 +1,37 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import cv2, dlib, numpy as np, base64, re, time
-# FIX: Pastikan mengimpor timezone untuk digunakan pada datetime.now()
-from datetime import datetime, timedelta, timezone 
+import cv2, dlib, numpy as np, base64, re, time, os
+from datetime import datetime, timezone
 from supabase_client import supabase
 from collections import deque
+
+try:
+    from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+    JWT_AVAILABLE = True
+except Exception:
+    JWT_AVAILABLE = False
+
+    def jwt_required(*args, **kwargs):
+        def decorator(fn):
+            return fn
+        return decorator
+
+    def get_jwt_identity():
+        return None
+
 
 app = Flask(__name__)
 CORS(app)
 
-# --- Inisialisasi Model Dlib ---
+if JWT_AVAILABLE:
+    app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
+    jwt = JWTManager(app)
+
+# Inisialisasi Model Dlib
 detector = dlib.get_frontal_face_detector()
 predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
 
-# --- Variabel Global Statis (Digunakan oleh /process_frame) ---
+# Variabel Global Deteksi
 BASE_EAR_THRESHOLD = 0.20
 TOTAL_BLINKS = 0
 LAST_BLINK_TIME = time.time()
@@ -21,7 +39,12 @@ START_TIME = None
 BLINK_TIMESTAMPS = deque()
 EYE_CLOSED = False
 
-# Global state untuk live stream (untuk diakses oleh frontend)
+STREAM_FRESH_SECONDS = 5
+# Stream Storage (Mapping Per hardware_id)
+# camera_client.py kirim hardware_id, jadi ini yang paling cocok.
+LATEST_STREAM_BY_HW = {}  # { hardware_id: {image, blink_count, blink_rate, message, hardware_id, last_update} }
+
+# Backward compatible 
 LATEST_STREAM_DATA = {
     "image": None,
     "blink_count": 0,
@@ -31,24 +54,138 @@ LATEST_STREAM_DATA = {
     "last_update": 0
 }
 
+# Camera Status + Session State
+camera_status = {}
+
+SESSION = {
+    "active": False,
+    "user_id": None,
+    "device_id": None,
+    "hardware_id": None,
+    "mode": "focus",
+    "started_at": None
+}
+
 
 def eye_aspect_ratio(eye):
-    """Hitung Eye Aspect Ratio (EAR)"""
     A = np.linalg.norm(eye[1] - eye[5])
     B = np.linalg.norm(eye[2] - eye[4])
     C = np.linalg.norm(eye[0] - eye[3])
     return (A + B) / (2.0 * C)
 
 
-@app.route('/')
+def reset_detection_globals():
+    global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS
+    TOTAL_BLINKS = 0
+    START_TIME = None
+    BLINK_TIMESTAMPS.clear()
+    EYE_CLOSED = False
+    LAST_BLINK_TIME = time.time()
+
+
+def _is_fresh(last_update: float):
+    return (time.time() - (last_update or 0)) <= STREAM_FRESH_SECONDS
+
+
+def is_stream_online(hardware_id: str = None):
+    """
+    Kalau hardware_id diisi: cek freshness stream device itu.
+    Kalau tidak: cek freshness stream terakhir (LATEST_STREAM_DATA).
+    """
+    if hardware_id:
+        item = LATEST_STREAM_BY_HW.get(hardware_id)
+        return bool(item) and _is_fresh(item.get("last_update"))
+    return _is_fresh(LATEST_STREAM_DATA.get("last_update"))
+
+
+def is_camera_active_for_hardware(hardware_id: str):
+    """
+    Kamera aktif jika mapping punya data hardware_id tsb dan fresh.
+    """
+    if not hardware_id:
+        return False
+    return is_stream_online(hardware_id)
+
+
+def set_latest_stream_for_hw(hardware_id: str, image: str, blink_count: int, blink_rate: float, message: str):
+    """
+    Update mapping stream per hardware_id + update LATEST_STREAM_DATA untuk kompatibilitas lama.
+    """
+    global LATEST_STREAM_DATA, LATEST_STREAM_BY_HW
+
+    payload = {
+        "image": image,
+        "blink_count": blink_count,
+        "blink_rate": blink_rate,
+        "message": message,
+        "hardware_id": hardware_id,
+        "last_update": time.time()
+    }
+
+    if hardware_id:
+        LATEST_STREAM_BY_HW[hardware_id] = payload
+
+    # backward compatible: "stream terbaru apapun"
+    LATEST_STREAM_DATA = payload
+
+
+def get_user_id_from_request_or_jwt():
+    """
+    Kalau pakai JWT, ambil dari token.
+    Kalau tidak, fallback ke:
+    - query param user_id (GET)
+    - JSON body user_id (POST)
+    """
+    uid = get_jwt_identity()
+    if uid:
+        return uid
+
+    uid_q = request.args.get("user_id")
+    if uid_q:
+        return uid_q
+
+    data = request.get_json(silent=True) or {}
+    return data.get("user_id")
+
+
+def get_device_for_user(device_id_raw: str, current_user_id: str):
+    """
+    Validasi device_id milik user, return row device (termasuk hardware_id).
+    device_id di DB kamu biasanya bigint.
+    """
+    try:
+        device_id = int(device_id_raw)
+    except Exception:
+        return None, ("device_id tidak valid (harus angka/bigint).", 400)
+
+    try:
+        dev_res = (
+            supabase.table("devices")
+            .select("id,user_id,hardware_id,is_active")
+            .eq("id", device_id)
+            .limit(1)
+            .execute()
+        )
+        if not dev_res.data:
+            return None, ("Device tidak ditemukan.", 404)
+
+        device = dev_res.data[0]
+        if device.get("user_id") != current_user_id:
+            return None, ("Forbidden: device bukan milik user ini.", 403)
+
+        return device, None
+    except Exception as e:
+        return None, (f"Gagal query device: {str(e)}", 500)
+
+
+@app.route("/")
 def api_home():
     return jsonify({"message": "Smart-Eye Blink Detection API is running!"})
 
 
-@app.route('/history', methods=['GET'])
+@app.route("/history", methods=["GET"])
 def get_history():
-    user_id = request.args.get('user_id')
-
+    user_id = request.args.get("user_id")
     if not user_id:
         return jsonify({"error": "User ID is required"}), 400
 
@@ -66,15 +203,195 @@ def get_history():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/process_frame', methods=['POST'])
+# Memulai deteksi
+# POST /api/start_detection
+# body: { device_id, mode, user_id(fallback) }
+
+@app.route("/api/start_detection", methods=["POST"])
+@jwt_required()
+def start_detection():
+    global SESSION, START_TIME, LAST_BLINK_TIME, TOTAL_BLINKS, EYE_CLOSED, BLINK_TIMESTAMPS
+
+    current_user_id = get_user_id_from_request_or_jwt()
+    data = request.get_json() or {}
+    device_id = data.get("device_id")
+    detection_mode = data.get("mode", "focus")
+
+    if not current_user_id:
+        return jsonify({"message": "User tidak terautentikasi (user_id/JWT missing)."}), 401
+    if not device_id:
+        return jsonify({"message": "device_id wajib diisi."}), 400
+
+    device, err = get_device_for_user(device_id, current_user_id)
+    if err:
+        msg, code = err
+        return jsonify({"message": msg}), code
+
+    if device.get("is_active") is False:
+        return jsonify({"message": "Device nonaktif. Aktifkan device terlebih dahulu."}), 400
+
+    hardware_id = device.get("hardware_id")
+
+    if not is_camera_active_for_hardware(hardware_id):
+        camera_status[hardware_id] = {"status": "inactive", "last_update": time.time()}
+        return jsonify({"message": "Kamera tidak aktif atau tidak ditemukan."}), 400
+
+    SESSION = {
+        "active": True,
+        "user_id": current_user_id,
+        "device_id": int(device_id),
+        "hardware_id": hardware_id,
+        "mode": "strict" if detection_mode == "strict" else "focus",
+        "started_at": datetime.now(timezone.utc).isoformat()
+    }
+
+    TOTAL_BLINKS = 0
+    START_TIME = time.time()
+    LAST_BLINK_TIME = time.time()
+    BLINK_TIMESTAMPS.clear()
+    EYE_CLOSED = False
+
+    return jsonify({"message": "Deteksi dimulai!", "session": SESSION}), 200
+
+
+# Status kamera
+# GET /api/camera_status/<device_id>
+
+@app.route("/api/camera_status/<string:device_id>", methods=["GET"])
+@jwt_required()
+def get_camera_status(device_id):
+    current_user_id = get_user_id_from_request_or_jwt()
+    if not current_user_id:
+        return jsonify({"message": "User tidak terautentikasi (user_id/JWT missing)."}), 401
+
+    device, err = get_device_for_user(device_id, current_user_id)
+    if err:
+        msg, code = err
+        return jsonify({"message": msg}), code
+
+    hardware_id = device.get("hardware_id")
+    active = is_camera_active_for_hardware(hardware_id)
+    status = "active" if active else "inactive"
+
+    camera_status[hardware_id] = {"status": status, "last_update": time.time()}
+
+    item = LATEST_STREAM_BY_HW.get(hardware_id) or {}
+    return jsonify({
+        "device_id": device.get("id"),
+        "hardware_id": hardware_id,
+        "status": status,
+        "stream_online": is_stream_online(hardware_id),
+        "last_stream_update": item.get("last_update", 0)
+    }), 200
+
+
+# Perangkat User
+# GET /api/devices
+
+@app.route("/api/devices", methods=["GET"])
+@jwt_required()
+def get_user_devices():
+    current_user_id = get_user_id_from_request_or_jwt()
+    if not current_user_id:
+        return jsonify({"message": "User tidak terautentikasi (user_id/JWT missing)."}), 401
+
+    try:
+        res = (
+            supabase.table("devices")
+            .select("*")
+            .eq("user_id", current_user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        return jsonify({"message": f"Gagal ambil devices: {str(e)}"}), 500
+
+
+# History per Device
+# GET /api/history/<device_id>
+
+@app.route("/api/history/<string:device_id>", methods=["GET"])
+@jwt_required()
+def get_history_by_device(device_id):
+    current_user_id = get_user_id_from_request_or_jwt()
+    if not current_user_id:
+        return jsonify({"message": "User tidak terautentikasi (user_id/JWT missing)."}), 401
+
+    device, err = get_device_for_user(device_id, current_user_id)
+    if err:
+        msg, code = err
+        return jsonify({"message": msg}), code
+
+    try:
+        hist = (
+            supabase.table("blink_history")
+            .select("*")
+            .eq("user_id", current_user_id)
+            .eq("device_id", device.get("id"))
+            .order("captured_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        return jsonify(hist.data or []), 200
+    except Exception as e:
+        return jsonify({"message": f"Gagal ambil history: {str(e)}"}), 500
+
+
+# Latest stream per device_id (Butuh authorize dulu)
+# GET /api/latest_stream/<device_id>
+# return stream dari mapping berdasarkan hardware_id milik device tsb
+
+@app.route("/api/latest_stream/<string:device_id>", methods=["GET"])
+@jwt_required()
+def api_latest_stream(device_id):
+    current_user_id = get_user_id_from_request_or_jwt()
+    if not current_user_id:
+        return jsonify({"message": "User tidak terautentikasi (user_id/JWT missing)."}), 401
+
+    device, err = get_device_for_user(device_id, current_user_id)
+    if err:
+        msg, code = err
+        return jsonify({"message": msg}), code
+
+    hardware_id = device.get("hardware_id")
+    item = LATEST_STREAM_BY_HW.get(hardware_id)
+
+    if not item:
+        return jsonify({"message": "Tidak ada data stream terbaru untuk perangkat ini."}), 404
+
+    if not _is_fresh(item.get("last_update")):
+        return jsonify({"message": "Stream untuk device ini sudah tidak fresh / kamera offline."}), 404
+
+    # optional: tambahkan status biar frontend gampang
+    return jsonify({
+        "status": "online",
+        "device_id": device.get("id"),
+        "hardware_id": hardware_id,
+        "data": item
+    }), 200
+
+
+# Stream input (dipanggil camera_client.py)
+# POST /process_frame
+
+@app.route("/process_frame", methods=["POST"])
 def process_frame():
-    global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS, BASE_EAR_THRESHOLD, LATEST_STREAM_DATA
+    global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS
+    global SESSION, camera_status
 
-    data = request.get_json()
-    hardware_id = data.get('hardware_id')
-    detection_mode = data.get('mode', 'focus')
+    data = request.get_json() or {}
+    hardware_id = data.get("hardware_id")
 
-    if detection_mode == 'strict':
+    # enforce session (kalau session aktif, tolak device lain)
+    if SESSION.get("active"):
+        session_hw = SESSION.get("hardware_id")
+        if session_hw and hardware_id and (hardware_id != session_hw):
+            return jsonify({"error": "Device mismatch: frame bukan dari device yang sedang aktif."}), 403
+
+    detection_mode = SESSION.get("mode") if SESSION.get("active") else data.get("mode", "focus")
+
+    if detection_mode == "strict":
         ear_threshold = 0.22
         stare_time_limit = 8
         warning_blink_rate = 8
@@ -90,7 +407,7 @@ def process_frame():
         EYE_CLOSED = False
 
     try:
-        img_str = re.search(r'base64,(.*)', data['image']).group(1)
+        img_str = re.search(r"base64,(.*)", data["image"]).group(1)
     except (AttributeError, KeyError):
         return jsonify({"error": "Invalid image format or missing image data"}), 400
 
@@ -100,9 +417,8 @@ def process_frame():
         return jsonify({"error": "Could not decode image"}), 400
 
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
     faces = detector(gray)
-    message = "Wajah tidak terdeteksi."
+
     blink_count = 0
     blink_rate = 0.0
 
@@ -124,7 +440,6 @@ def process_frame():
             BLINK_TIMESTAMPS.append(LAST_BLINK_TIME)
 
         now = time.time()
-
         window_seconds = 60
         while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > window_seconds:
             BLINK_TIMESTAMPS.popleft()
@@ -138,10 +453,7 @@ def process_frame():
             blink_rate = round((blink_count / actual_window) * 60.0, 2)
         else:
             elapsed_time = now - START_TIME if START_TIME else 0
-            if elapsed_time >= 1:
-                blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60.0, 2)
-            else:
-                blink_rate = 0.0
+            blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60.0, 2) if elapsed_time >= 1 else 0.0
 
         time_since_last_blink = now - LAST_BLINK_TIME
 
@@ -152,14 +464,17 @@ def process_frame():
         else:
             message = f"✅ Deteksi berjalan normal. Laju kedipan: {blink_rate}/menit (Mode: {detection_mode.upper()})"
 
-        LATEST_STREAM_DATA = {
-            "image": data['image'], # Gambar base64 dari camera_client
-            "blink_count": blink_count,
-            "blink_rate": blink_rate,
-            "message": message,
-            "hardware_id": hardware_id,
-            "last_update": time.time()
-        }
+        # Menyimpan stream per hardware_id
+        set_latest_stream_for_hw(
+            hardware_id=hardware_id,
+            image=data["image"],
+            blink_count=blink_count,
+            blink_rate=blink_rate,
+            message=message
+        )
+
+        if hardware_id:
+            camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
 
         return jsonify({
             "message": message,
@@ -168,43 +483,57 @@ def process_frame():
             "blink_rate": blink_rate
         })
 
+    # Tidak ada wajah, tapi stream tetap dianggap hidup
+    message = "⚠️ Wajah tidak terdeteksi. Silakan posisikan ulang kamera."
+    set_latest_stream_for_hw(
+        hardware_id=hardware_id,
+        image=data.get("image"),
+        blink_count=0,
+        blink_rate=0.0,
+        message=message
+    )
+
+    if hardware_id:
+        camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
+
     return jsonify({
-        "message": "⚠️ Wajah tidak terdeteksi. Silakan posisikan ulang kamera.",
+        "message": message,
         "total_blinks": TOTAL_BLINKS,
-        "blink_count": blink_count,
+        "blink_count": 0,
         "blink_rate": 0
     })
 
-@app.route('/stream/latest', methods=['GET'])
-def get_latest_stream():
-    # Cek apakah data masih "segar" (update terakhir < 5 detik lalu)
-    if time.time() - LATEST_STREAM_DATA['last_update'] > 5:
-        return jsonify({"status": "offline", "message": "Kamera tidak aktif/terputus."})
-    
-    return jsonify({
-        "status": "online",
-        "data": LATEST_STREAM_DATA
-    })
 
-@app.route('/devices', methods=['GET'])
+# Backward compatible: stream terbaru apapun (tanpa device filter)
+# GET /stream/latest
+
+@app.route("/stream/latest", methods=["GET"])
+def get_latest_stream():
+    if not is_stream_online():
+        return jsonify({"status": "offline", "message": "Kamera tidak aktif/terputus."})
+    return jsonify({"status": "online", "data": LATEST_STREAM_DATA})
+
+
+# (Optional lama kamu)
+@app.route("/devices", methods=["GET"])
 def get_devices():
-    user_id = request.args.get('user_id')
+    user_id = request.args.get("user_id")
     if not user_id:
         return jsonify({"error": "User ID required"}), 400
-    
+
     try:
-        # Ambil semua device milik user
         response = supabase.table("devices").select("*").eq("user_id", user_id).execute()
         return jsonify(response.data)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/devices', methods=['POST'])
+
+@app.route("/devices", methods=["POST"])
 def register_device():
-    data = request.get_json()
-    user_id = data.get('user_id')
-    device_name = data.get('device_name')
-    hardware_id = data.get('hardware_id') 
+    data = request.get_json() or {}
+    user_id = data.get("user_id")
+    device_name = data.get("device_name")
+    hardware_id = data.get("hardware_id")
 
     if not user_id or not device_name or not hardware_id:
         return jsonify({"error": "Data incomplete (missing user_id, device_name, or hardware_id)"}), 400
@@ -215,7 +544,6 @@ def register_device():
             "device_name": device_name,
             "is_active": True,
             "hardware_id": hardware_id,
-            # FIX: Ganti UTC dengan timezone.utc
             "created_at": datetime.now(timezone.utc).isoformat(),
             "updated_date": datetime.now(timezone.utc).isoformat()
         }
@@ -224,57 +552,48 @@ def register_device():
     except Exception as e:
         print(f"Error registering device: {e}")
         if "unique constraint" in str(e).lower():
-             return jsonify({"error": "Perangkat ini sudah didaftarkan."}), 409
+            return jsonify({"error": "Perangkat ini sudah didaftarkan."}), 409
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/stop_detection', methods=['POST'])
+@app.route("/stop_detection", methods=["POST"])
 def stop_detection():
-    global TOTAL_BLINKS, START_TIME, BLINK_TIMESTAMPS, EYE_CLOSED, LAST_BLINK_TIME
+    global SESSION
 
-    data = request.get_json()
+    data = request.get_json() or {}
 
-    current_user_id = data.get('user_id')
-    current_device_id = data.get('device_id')
-    current_detection_mode = data.get('detection_mode', 'focus')
-    
-    # Ambil statistik akhir yang dikirim dari Frontend
-    client_total_blinks = data.get('total_blinks')
-    client_blink_rate = data.get('blink_rate')
+    current_user_id = data.get("user_id")
+    current_device_id = data.get("device_id")
+    current_detection_mode = data.get("detection_mode", "focus")
+
+    client_total_blinks = data.get("total_blinks")
+    client_blink_rate = data.get("blink_rate")
 
     if not current_user_id:
-        # Reset globals
-        TOTAL_BLINKS = 0
-        START_TIME = None
-        BLINK_TIMESTAMPS.clear()
-        EYE_CLOSED = False
+        reset_detection_globals()
+        SESSION = {"active": False, "user_id": None, "device_id": None, "hardware_id": None, "mode": "focus", "started_at": None}
         return jsonify({"message": "Sesi selesai, namun data tidak disimpan. User ID hilang."}), 400
 
-    frontend_start_time = data.get('start_time')
-    frontend_end_time = data.get('end_time')
+    frontend_start_time = data.get("start_time")
+    frontend_end_time = data.get("end_time")
+
     duration_sec = 0
-    # Gunakan rate dari client (jika ada), atau 0.0
     blink_per_minute = client_blink_rate if client_blink_rate is not None else 0.0
 
     try:
-        # Hitung durasi sesi
         if frontend_start_time and frontend_end_time:
-            start_dt = datetime.fromisoformat(frontend_start_time.replace('Z', '+00:00'))
-            end_dt = datetime.fromisoformat(frontend_end_time.replace('Z', '+00:00'))
+            start_dt = datetime.fromisoformat(frontend_start_time.replace("Z", "+00:00"))
+            end_dt = datetime.fromisoformat(frontend_end_time.replace("Z", "+00:00"))
             duration_sec = int((end_dt - start_dt).total_seconds())
-        else:
-            duration_sec = 0
     except Exception:
         duration_sec = 0
 
-    # Gunakan total blink dari client, jika tidak ada, pakai global
     actual_total_blinks = client_total_blinks if client_total_blinks is not None else TOTAL_BLINKS
-    
-    # Hitung BPM ulang jika durasi dan blink count tersedia dan client tidak mengirim rate
-    if duration_sec > 1 and actual_total_blinks > 0 and client_blink_rate is None:
-        blink_per_minute = round((actual_total_blinks / (duration_sec / 60)), 2) 
 
-    warning_limit = 8 if current_detection_mode == 'strict' else 10
+    if duration_sec > 1 and actual_total_blinks > 0 and client_blink_rate is None:
+        blink_per_minute = round((actual_total_blinks / (duration_sec / 60)), 2)
+
+    warning_limit = 8 if current_detection_mode == "strict" else 10
     warning_triggered = actual_total_blinks == 0 or blink_per_minute < warning_limit
 
     record = {
@@ -283,12 +602,10 @@ def stop_detection():
         "blink_per_minute": int(blink_per_minute),
         "warning_triggered": warning_triggered,
         "note": f"Mode: {current_detection_mode.upper()}",
-        # FIX: Ganti UTC dengan timezone.utc
-        "captured_at": datetime.now(timezone.utc).isoformat(), 
+        "captured_at": datetime.now(timezone.utc).isoformat(),
         "user_id": current_user_id,
         "device_id": current_device_id,
         "detection_mode": current_detection_mode,
-        # FIX: Ganti UTC dengan timezone.utc
         "created_at": datetime.now(timezone.utc).isoformat()
     }
 
@@ -296,25 +613,16 @@ def stop_detection():
         try:
             supabase.table("blink_history").insert(record).execute()
         except Exception as e:
-            print(f"SUPABASE SAVE ERROR in stop_detection: {e}") 
-            TOTAL_BLINKS = 0
-            START_TIME = None
-            BLINK_TIMESTAMPS.clear()
-            EYE_CLOSED = False
-            LAST_BLINK_TIME = time.time()
+            print(f"SUPABASE SAVE ERROR in stop_detection: {e}")
+            reset_detection_globals()
+            SESSION = {"active": False, "user_id": None, "device_id": None, "hardware_id": None, "mode": "focus", "started_at": None}
             return jsonify({"error": f"Gagal menyimpan data ke Supabase: {str(e)}"}), 500
-        
+
     if current_device_id:
-        # Update last_seen_at
-        # FIX: Ganti UTC dengan timezone.utc
         supabase.table("devices").update({"last_seen_at": datetime.now(timezone.utc).isoformat()}).eq("id", current_device_id).execute()
 
-    # Reset globals setelah sesi selesai
-    TOTAL_BLINKS = 0
-    START_TIME = None
-    BLINK_TIMESTAMPS.clear()
-    EYE_CLOSED = False
-    LAST_BLINK_TIME = time.time()
+    reset_detection_globals()
+    SESSION = {"active": False, "user_id": None, "device_id": None, "hardware_id": None, "mode": "focus", "started_at": None}
 
     return jsonify({
         "message": "Deteksi dihentikan. Data sesi berhasil disimpan.",
@@ -324,5 +632,5 @@ def stop_detection():
     })
 
 
-if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+if __name__ == "__main__":
+    app.run(debug=True, host="0.0.0.0", port=5000)
