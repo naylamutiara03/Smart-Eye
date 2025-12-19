@@ -1,9 +1,9 @@
 Flask
 Flask-Cors
-opencv-python-headless
-mediapipe
 numpy
 supabase
 requests
 gunicorn
 Flask-JWT-Extended
+mediapipe==0.10.9
+protobuf==3.20.3
