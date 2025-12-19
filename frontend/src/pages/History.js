@@ -69,7 +69,7 @@ function History() {
         setDevices(normalized);
 
         // Default: kalau ada device → pilih device pertama
-        // Tetap bisa ubah ke "all" 
+        // Tetap bisa ubah ke "all"
         if (normalized.length > 0) {
           setSelectedDevice(String(normalized[0].id));
         } else {
@@ -130,7 +130,7 @@ function History() {
       }
     };
 
-    // Tidak fetch history sebelum devices selesai 
+    // Tidak fetch history sebelum devices selesai
     if (!loadingDevices) {
       fetchHistory();
     }
@@ -193,9 +193,7 @@ function History() {
           <div className="card shadow-lg border-0">
             <div className="card-header bg-primary text-white p-3 d-flex align-items-center justify-content-between">
               <h5 className="mb-0">Daftar Sesi Perekaman</h5>
-              <small className="opacity-75">
-                Filter: {selectedDeviceName}
-              </small>
+              <small className="opacity-75">Filter: {selectedDeviceName}</small>
             </div>
 
             <div className="card-body table-responsive">
@@ -230,7 +228,8 @@ function History() {
                       ? String(r.detection_mode).toUpperCase()
                       : "FOCUS";
 
-                    const modeClass = mode === "STRICT" ? "bg-danger" : "bg-success";
+                    const modeClass =
+                      mode === "STRICT" ? "bg-danger" : "bg-success";
 
                     const warningIcon = r.warning_triggered ? (
                       <AlertTriangle size={20} color="red" />
@@ -280,7 +279,8 @@ function History() {
             </div>
 
             <div className="card-footer text-muted text-end">
-              Data diambil dari {selectedDevice === "all" ? "20" : "50"} sesi terakhir.
+              Data diambil dari {selectedDevice === "all" ? "20" : "50"} sesi
+              terakhir.
             </div>
           </div>
         ) : (

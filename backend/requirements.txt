@@ -1,7 +1,7 @@
 Flask
 Flask-Cors
 opencv-python-headless
-dlib
+mediapipe
 numpy
 supabase
 requests

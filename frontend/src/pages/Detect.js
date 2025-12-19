@@ -141,10 +141,18 @@ const ModeToggle = ({ detectionMode, setDetectionMode, isDetecting }) => {
   return (
     <div style={toggleStyle}>
       <div style={{ display: "flex", flexDirection: "column" }}>
-        <span style={{ fontWeight: "700", color: isStrict ? color : "#1f2937" }}>
+        <span
+          style={{ fontWeight: "700", color: isStrict ? color : "#1f2937" }}
+        >
           Mode Deteksi: {isStrict ? "Strict" : "Fokus"}
         </span>
-        <span style={{ fontSize: "0.75rem", color: "#6b7280", marginTop: "0.25rem" }}>
+        <span
+          style={{
+            fontSize: "0.75rem",
+            color: "#6b7280",
+            marginTop: "0.25rem",
+          }}
+        >
           {isStrict
             ? "Peringatan lebih sensitif dan sering."
             : "Peringatan standar, cocok untuk pekerjaan umum."}
@@ -186,7 +194,7 @@ function Detect() {
   );
 
   // Status kamera + detectionRunning
-  
+
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [detectionRunning, setDetectionRunning] = useState(false);
 
@@ -218,15 +226,17 @@ function Detect() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  
+
   // Cek status kamera (polling 5 detik)
- 
+
   useEffect(() => {
     let mounted = true;
 
     const checkCameraStatus = async () => {
       try {
-        const res = await axios.get(`${API_URL}/stream/latest`, { timeout: 2000 });
+        const res = await axios.get(`${API_URL}/stream/latest`, {
+          timeout: 2000,
+        });
         const online = res?.data?.status === "online";
         if (mounted) setIsCameraActive(online);
       } catch (err) {
@@ -264,8 +274,11 @@ function Detect() {
       // Cek kamera aktif dulu
       if (!isCameraActive) {
         setWarning("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
-        setWarningText("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
-        warningTextRef.current = "⚠️ Kamera offline. Pastikan camera_client.py berjalan.";
+        setWarningText(
+          "⚠️ Kamera offline. Pastikan camera_client.py berjalan."
+        );
+        warningTextRef.current =
+          "⚠️ Kamera offline. Pastikan camera_client.py berjalan.";
         return;
       }
 
@@ -320,7 +333,9 @@ function Detect() {
               }
             }
           } else {
-            setWarning("⚠️ Kamera offline. Pastikan camera_client.py berjalan.");
+            setWarning(
+              "⚠️ Kamera offline. Pastikan camera_client.py berjalan."
+            );
           }
         } catch (err) {
           console.error("Error polling stream:", err);
@@ -402,7 +417,9 @@ function Detect() {
       } catch (err) {
         console.error("Error stopping detection:", err);
         setWarning(
-          `Error saat menghentikan sesi: ${err?.message || err}. Data mungkin tidak tersimpan.`
+          `Error saat menghentikan sesi: ${
+            err?.message || err
+          }. Data mungkin tidak tersimpan.`
         );
       }
     } else {
@@ -614,7 +631,13 @@ function Detect() {
                   )}
                 </div>
 
-                <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "1rem",
+                  }}
+                >
                   {!isDetecting ? (
                     <button
                       onClick={startDetection}
@@ -642,7 +665,9 @@ function Detect() {
                           marginRight: "0.5rem",
                         }}
                       />
-                      {detectionRunning ? "Deteksi Berjalan..." : "Mulai Deteksi"}
+                      {detectionRunning
+                        ? "Deteksi Berjalan..."
+                        : "Mulai Deteksi"}
                     </button>
                   ) : (
                     <button
@@ -657,7 +682,9 @@ function Detect() {
                       onMouseDown={(e) =>
                         (e.currentTarget.style.transform = "scale(0.99)")
                       }
-                      onMouseUp={(e) => (e.currentTarget.style.transform = "scale(1)")}
+                      onMouseUp={(e) =>
+                        (e.currentTarget.style.transform = "scale(1)")
+                      }
                     >
                       <StopIcon
                         style={{
@@ -749,21 +776,41 @@ function Detect() {
                 </h2>
 
                 {/* ✅ TAMBAHAN: Status Kamera */}
-                <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+                <p
+                  style={{
+                    color: "#6b7280",
+                    fontSize: "0.875rem",
+                    marginBottom: "0.5rem",
+                  }}
+                >
                   Status kamera:{" "}
                   {isCameraActive ? (
-                    <span style={{ color: "#10b981", fontWeight: "bold" }}>AKTIF</span>
+                    <span style={{ color: "#10b981", fontWeight: "bold" }}>
+                      AKTIF
+                    </span>
                   ) : (
-                    <span style={{ color: "#ef4444", fontWeight: "bold" }}>TIDAK AKTIF</span>
+                    <span style={{ color: "#ef4444", fontWeight: "bold" }}>
+                      TIDAK AKTIF
+                    </span>
                   )}
                 </p>
 
-                <p style={{ color: "#6b7280", fontSize: "0.875rem", marginBottom: "0.5rem" }}>
+                <p
+                  style={{
+                    color: "#6b7280",
+                    fontSize: "0.875rem",
+                    marginBottom: "0.5rem",
+                  }}
+                >
                   Status deteksi:{" "}
                   {isDetecting ? (
-                    <span style={{ color: "#10b981", fontWeight: "bold" }}>AKTIF</span>
+                    <span style={{ color: "#10b981", fontWeight: "bold" }}>
+                      AKTIF
+                    </span>
                   ) : (
-                    <span style={{ color: "#f97316", fontWeight: "bold" }}>TIDAK AKTIF</span>
+                    <span style={{ color: "#f97316", fontWeight: "bold" }}>
+                      TIDAK AKTIF
+                    </span>
                   )}
                 </p>
 
@@ -855,7 +902,13 @@ function Detect() {
               </div>
             </div>
 
-            <p style={{ marginTop: "1rem", fontSize: "0.75rem", color: "#9ca3af" }}>
+            <p
+              style={{
+                marginTop: "1rem",
+                fontSize: "0.75rem",
+                color: "#9ca3af",
+              }}
+            >
               API Endpoint: {API_URL}
             </p>
           </div>

@@ -1,9 +1,9 @@
 // frontend/src/pages/Home.js
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
-import { Line } from 'react-chartjs-2';
-import { supabase } from '../supabaseClient';
-import { useNavigate } from 'react-router-dom';
+import React, { useState, useEffect } from "react";
+import axios from "axios";
+import { Line } from "react-chartjs-2";
+import { supabase } from "../supabaseClient";
+import { useNavigate } from "react-router-dom";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -14,12 +14,20 @@ import {
   Tooltip,
   Legend,
   Filler,
-} from 'chart.js';
+} from "chart.js";
 
-ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
 
-const API_URL = 'http://127.0.0.1:5000';
-
+const API_URL = "http://127.0.0.1:5000";
 
 function Home() {
   const [chartData, setChartData] = useState(null);
@@ -29,7 +37,7 @@ function Home() {
 
   // State baru untuk menyimpan raw data dan filter
   const [rawData, setRawData] = useState([]);
-  const [timeRange, setTimeRange] = useState('7'); // Default 7 hari
+  const [timeRange, setTimeRange] = useState("7"); // Default 7 hari
   const [refreshing, setRefreshing] = useState(false);
 
   const navigate = useNavigate();
@@ -38,20 +46,22 @@ function Home() {
   // >>> PERUBAHAN BARU: Mengatur Judul Halaman <<<
   // ========================================================
   useEffect(() => {
-    document.title = 'Home';
+    document.title = "Home";
 
-    // Cleanup function: mengembalikan judul lama saat komponen di-unmount 
+    // Cleanup function: mengembalikan judul lama saat komponen di-unmount
     // (Opsional, tapi baik untuk menjaga kebersihan jika Anda ingin judul default)
     return () => {
-      document.title = 'React App'; // Ganti dengan judul default aplikasi Anda jika ada
+      document.title = "React App"; // Ganti dengan judul default aplikasi Anda jika ada
     };
   }, []);
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
       if (!session) {
-        navigate('/login');
+        navigate("/login");
       } else {
         setUser(session.user);
         fetchHistory(session.user);
@@ -73,10 +83,9 @@ function Home() {
       // Kita reverse di sini agar urutan waktu benar (lama -> baru) sebelum diproses
       const records = response.data.reverse();
       setRawData(records);
-
     } catch (err) {
-      console.error('Error fetching history:', err);
-      setError('Gagal memuat data history. Pastikan backend Flask berjalan.');
+      console.error("Error fetching history:", err);
+      setError("Gagal memuat data history. Pastikan backend Flask berjalan.");
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -97,7 +106,7 @@ function Home() {
       cutoffDate.setDate(now.getDate() - parseInt(timeRange));
 
       // Langkah A: Filter data berdasarkan range tanggal
-      const filteredData = rawData.filter(item => {
+      const filteredData = rawData.filter((item) => {
         const itemDate = new Date(item.captured_at);
         return itemDate >= cutoffDate;
       });
@@ -111,10 +120,13 @@ function Home() {
       // Struktur groupedData: { "25/11/2023": [12, 15, 10], "26/11/2023": [20, ...] }
       const groupedData = {};
 
-      filteredData.forEach(item => {
+      filteredData.forEach((item) => {
         const dateObj = new Date(item.captured_at);
         // Format tanggal (DD/MM) sebagai label
-        const dateKey = dateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'short' });
+        const dateKey = dateObj.toLocaleDateString("id-ID", {
+          day: "numeric",
+          month: "short",
+        });
 
         if (!groupedData[dateKey]) {
           groupedData[dateKey] = [];
@@ -124,7 +136,7 @@ function Home() {
 
       // Langkah C: Hitung Rata-rata per hari
       const labels = Object.keys(groupedData);
-      const dataPoints = labels.map(date => {
+      const dataPoints = labels.map((date) => {
         const values = groupedData[date];
         const sum = values.reduce((a, b) => a + b, 0);
         return (sum / values.length).toFixed(1); // Ambil 1 desimal
@@ -138,17 +150,17 @@ function Home() {
             label: `Rata-rata Kedipan (${timeRange} Hari Terakhir)`,
             data: dataPoints,
             fill: true,
-            borderColor: '#0d6efd',
+            borderColor: "#0d6efd",
             backgroundColor: (context) => {
               const ctx = context.chart.ctx;
               const gradient = ctx.createLinearGradient(0, 0, 0, 450);
-              gradient.addColorStop(0, 'rgba(13, 110, 253, 0.4)');
-              gradient.addColorStop(1, 'rgba(13, 110, 253, 0.05)');
+              gradient.addColorStop(0, "rgba(13, 110, 253, 0.4)");
+              gradient.addColorStop(1, "rgba(13, 110, 253, 0.05)");
               return gradient;
             },
             tension: 0.4, // Kurva lebih mulus
-            pointBackgroundColor: '#fff',
-            pointBorderColor: '#0d6efd',
+            pointBackgroundColor: "#fff",
+            pointBorderColor: "#0d6efd",
             pointBorderWidth: 2,
             pointRadius: 4,
             pointHoverRadius: 7,
@@ -172,35 +184,35 @@ function Home() {
     maintainAspectRatio: false,
     plugins: {
       legend: {
-        position: 'top',
-        labels: { font: { family: 'Poppins' } },
+        position: "top",
+        labels: { font: { family: "Poppins" } },
       },
       title: {
         display: false, // Title dipindah ke header card
       },
       tooltip: {
-        backgroundColor: 'rgba(255, 255, 255, 0.9)',
-        titleColor: '#000',
-        bodyColor: '#666',
-        borderColor: '#ddd',
+        backgroundColor: "rgba(255, 255, 255, 0.9)",
+        titleColor: "#000",
+        bodyColor: "#666",
+        borderColor: "#ddd",
         borderWidth: 1,
         padding: 10,
         callbacks: {
           label: function (context) {
             return `Rata-rata: ${context.parsed.y} kedipan/menit`;
-          }
-        }
-      }
+          },
+        },
+      },
     },
     scales: {
       y: {
         beginAtZero: true,
         grid: { borderDash: [5, 5] },
-        title: { display: true, text: 'Rata-rata Kedipan' }
+        title: { display: true, text: "Rata-rata Kedipan" },
       },
       x: {
         grid: { display: false },
-        title: { display: true, text: 'Tanggal' }
+        title: { display: true, text: "Tanggal" },
       },
     },
   };
@@ -214,16 +226,23 @@ function Home() {
             <p className="text-muted mb-1">
               Login sebagai:
               <strong className="text-secondary ms-1">
-                {user ? user.email : 'Memuat...'}
+                {user ? user.email : "Memuat..."}
               </strong>
             </p>
-            <p className="text-muted mt-0">Pantau kebiasaan dan kesehatan mata Anda.</p>
+            <p className="text-muted mt-0">
+              Pantau kebiasaan dan kesehatan mata Anda.
+            </p>
           </div>
 
-          <div className="card shadow-lg border-0 rounded-4 mx-auto" style={{ maxWidth: '1000px' }}>
+          <div
+            className="card shadow-lg border-0 rounded-4 mx-auto"
+            style={{ maxWidth: "1000px" }}
+          >
             {/* HEADER CARD: Judul & Kontrol Filter (PERUBAHAN DI SINI) */}
-            <div className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap 
- justify-content-center justify-content-md-between align-items-center gap-3">
+            <div
+              className="card-header bg-white border-bottom-0 pt-4 px-4 d-flex flex-wrap 
+ justify-content-center justify-content-md-between align-items-center gap-3"
+            >
               {/* Judul Analisis (text-center pada layar kecil) */}
               <div className="text-center text-md-start">
                 <h5 className="mb-1 fw-bold text-dark">Analisis Kebiasaan</h5>
@@ -235,7 +254,7 @@ function Home() {
                 {/* DROPDOWN FILTER HARI */}
                 <select
                   className="form-select form-select-sm shadow-none border-secondary-subtle"
-                  style={{ width: '150px', borderRadius: '8px' }}
+                  style={{ width: "150px", borderRadius: "8px" }}
                   value={timeRange}
                   onChange={(e) => setTimeRange(e.target.value)}
                 >
@@ -250,14 +269,17 @@ function Home() {
                   onClick={handleRefresh}
                   disabled={refreshing}
                 >
-                  {refreshing ? 'Loading...' : 'Refresh'}
+                  {refreshing ? "Loading..." : "Refresh"}
                 </button>
               </div>
             </div>
-            <div className="card-body p-4" style={{ height: '450px' }}>
+            <div className="card-body p-4" style={{ height: "450px" }}>
               {loading ? (
                 <div className="d-flex flex-column justify-content-center align-items-center h-100">
-                  <div className="spinner-border text-primary mb-3" role="status" />
+                  <div
+                    className="spinner-border text-primary mb-3"
+                    role="status"
+                  />
                   <p className="text-muted">Mengambil data...</p>
                 </div>
               ) : error ? (
@@ -275,7 +297,6 @@ function Home() {
         </div>
       </div>
     </div>
-
   );
 }
 

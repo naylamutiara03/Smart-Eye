@@ -1,6 +1,12 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import cv2, dlib, numpy as np, base64, re, time, os
+import cv2
+import numpy as np
+import base64
+import re
+import time
+import os
+import mediapipe as mp  # Import MediaPipe
 from datetime import datetime, timezone
 from supabase_client import supabase
 from collections import deque
@@ -27,9 +33,20 @@ if JWT_AVAILABLE:
     app.config["JWT_SECRET_KEY"] = os.getenv("JWT_SECRET_KEY", "dev-secret-change-me")
     jwt = JWTManager(app)
 
-# Inisialisasi Model Dlib
-detector = dlib.get_frontal_face_detector()
-predictor = dlib.shape_predictor("shape_predictor_68_face_landmarks.dat")
+# --- Inisialisasi MediaPipe Face Mesh ---
+mp_face_mesh = mp.solutions.face_mesh
+face_mesh = mp_face_mesh.FaceMesh(
+    max_num_faces=1,
+    refine_landmarks=True,  # Penting untuk akurasi iris/mata
+    min_detection_confidence=0.5,
+    min_tracking_confidence=0.5
+)
+
+# Indeks Landmark Mata untuk MediaPipe (Mengikuti pola EAR)
+# Left Eye (sesuai urutan dlib: P1, P2, P3, P4, P5, P6)
+LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144]
+# Right Eye
+RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380]
 
 # Variabel Global Deteksi
 BASE_EAR_THRESHOLD = 0.20
@@ -41,8 +58,7 @@ EYE_CLOSED = False
 
 STREAM_FRESH_SECONDS = 5
 # Stream Storage (Mapping Per hardware_id)
-# camera_client.py kirim hardware_id, jadi ini yang paling cocok.
-LATEST_STREAM_BY_HW = {}  # { hardware_id: {image, blink_count, blink_rate, message, hardware_id, last_update} }
+LATEST_STREAM_BY_HW = {} 
 
 # Backward compatible 
 LATEST_STREAM_DATA = {
@@ -68,6 +84,7 @@ SESSION = {
 
 
 def eye_aspect_ratio(eye):
+    # eye adalah numpy array koordinat (x, y)
     A = np.linalg.norm(eye[1] - eye[5])
     B = np.linalg.norm(eye[2] - eye[4])
     C = np.linalg.norm(eye[0] - eye[3])
@@ -88,10 +105,6 @@ def _is_fresh(last_update: float):
 
 
 def is_stream_online(hardware_id: str = None):
-    """
-    Kalau hardware_id diisi: cek freshness stream device itu.
-    Kalau tidak: cek freshness stream terakhir (LATEST_STREAM_DATA).
-    """
     if hardware_id:
         item = LATEST_STREAM_BY_HW.get(hardware_id)
         return bool(item) and _is_fresh(item.get("last_update"))
@@ -99,18 +112,12 @@ def is_stream_online(hardware_id: str = None):
 
 
 def is_camera_active_for_hardware(hardware_id: str):
-    """
-    Kamera aktif jika mapping punya data hardware_id tsb dan fresh.
-    """
     if not hardware_id:
         return False
     return is_stream_online(hardware_id)
 
 
 def set_latest_stream_for_hw(hardware_id: str, image: str, blink_count: int, blink_rate: float, message: str):
-    """
-    Update mapping stream per hardware_id + update LATEST_STREAM_DATA untuk kompatibilitas lama.
-    """
     global LATEST_STREAM_DATA, LATEST_STREAM_BY_HW
 
     payload = {
@@ -125,16 +132,12 @@ def set_latest_stream_for_hw(hardware_id: str, image: str, blink_count: int, bli
     if hardware_id:
         LATEST_STREAM_BY_HW[hardware_id] = payload
 
-    # backward compatible: "stream terbaru apapun"
     LATEST_STREAM_DATA = payload
 
 
 def get_user_id_from_request_or_jwt():
     """
-    Kalau pakai JWT, ambil dari token.
-    Kalau tidak, fallback ke:
-    - query param user_id (GET)
-    - JSON body user_id (POST)
+    Mengambil ID User dari Token JWT (jika ada) ATAU dari parameter request.
     """
     uid = get_jwt_identity()
     if uid:
@@ -149,10 +152,6 @@ def get_user_id_from_request_or_jwt():
 
 
 def get_device_for_user(device_id_raw: str, current_user_id: str):
-    """
-    Validasi device_id milik user, return row device (termasuk hardware_id).
-    device_id di DB kamu biasanya bigint.
-    """
     try:
         device_id = int(device_id_raw)
     except Exception:
@@ -180,7 +179,7 @@ def get_device_for_user(device_id_raw: str, current_user_id: str):
 
 @app.route("/")
 def api_home():
-    return jsonify({"message": "Smart-Eye Blink Detection API is running!"})
+    return jsonify({"message": "Smart-Eye Blink Detection API (MediaPipe) is running!"})
 
 
 @app.route("/history", methods=["GET"])
@@ -203,12 +202,8 @@ def get_history():
         return jsonify({"error": str(e)}), 500
 
 
-# Memulai deteksi
-# POST /api/start_detection
-# body: { device_id, mode, user_id(fallback) }
-
 @app.route("/api/start_detection", methods=["POST"])
-@jwt_required()
+@jwt_required(optional=True)  # Diubah ke optional agar support fallback user_id
 def start_detection():
     global SESSION, START_TIME, LAST_BLINK_TIME, TOTAL_BLINKS, EYE_CLOSED, BLINK_TIMESTAMPS
 
@@ -254,11 +249,8 @@ def start_detection():
     return jsonify({"message": "Deteksi dimulai!", "session": SESSION}), 200
 
 
-# Status kamera
-# GET /api/camera_status/<device_id>
-
 @app.route("/api/camera_status/<string:device_id>", methods=["GET"])
-@jwt_required()
+@jwt_required(optional=True) # Diubah ke optional
 def get_camera_status(device_id):
     current_user_id = get_user_id_from_request_or_jwt()
     if not current_user_id:
@@ -285,11 +277,8 @@ def get_camera_status(device_id):
     }), 200
 
 
-# Perangkat User
-# GET /api/devices
-
 @app.route("/api/devices", methods=["GET"])
-@jwt_required()
+@jwt_required(optional=True)  # PERBAIKAN: Optional=True agar request dari History.js (tanpa token) bisa masuk
 def get_user_devices():
     current_user_id = get_user_id_from_request_or_jwt()
     if not current_user_id:
@@ -308,11 +297,8 @@ def get_user_devices():
         return jsonify({"message": f"Gagal ambil devices: {str(e)}"}), 500
 
 
-# History per Device
-# GET /api/history/<device_id>
-
 @app.route("/api/history/<string:device_id>", methods=["GET"])
-@jwt_required()
+@jwt_required(optional=True) # PERBAIKAN: Optional=True agar request history per device juga berjalan
 def get_history_by_device(device_id):
     current_user_id = get_user_id_from_request_or_jwt()
     if not current_user_id:
@@ -338,12 +324,8 @@ def get_history_by_device(device_id):
         return jsonify({"message": f"Gagal ambil history: {str(e)}"}), 500
 
 
-# Latest stream per device_id (Butuh authorize dulu)
-# GET /api/latest_stream/<device_id>
-# return stream dari mapping berdasarkan hardware_id milik device tsb
-
 @app.route("/api/latest_stream/<string:device_id>", methods=["GET"])
-@jwt_required()
+@jwt_required(optional=True) # Diubah ke optional
 def api_latest_stream(device_id):
     current_user_id = get_user_id_from_request_or_jwt()
     if not current_user_id:
@@ -363,7 +345,6 @@ def api_latest_stream(device_id):
     if not _is_fresh(item.get("last_update")):
         return jsonify({"message": "Stream untuk device ini sudah tidak fresh / kamera offline."}), 404
 
-    # optional: tambahkan status biar frontend gampang
     return jsonify({
         "status": "online",
         "device_id": device.get("id"),
@@ -371,9 +352,6 @@ def api_latest_stream(device_id):
         "data": item
     }), 200
 
-
-# Stream input (dipanggil camera_client.py)
-# POST /process_frame
 
 @app.route("/process_frame", methods=["POST"])
 def process_frame():
@@ -383,7 +361,7 @@ def process_frame():
     data = request.get_json() or {}
     hardware_id = data.get("hardware_id")
 
-    # enforce session (kalau session aktif, tolak device lain)
+    # enforce session
     if SESSION.get("active"):
         session_hw = SESSION.get("hardware_id")
         if session_hw and hardware_id and (hardware_id != session_hw):
@@ -416,19 +394,34 @@ def process_frame():
     if frame is None:
         return jsonify({"error": "Could not decode image"}), 400
 
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    faces = detector(gray)
+    # --- MEDIAPIPE LOGIC START ---
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    img_h, img_w, _ = frame.shape
+    
+    results = face_mesh.process(rgb_frame)
 
     blink_count = 0
     blink_rate = 0.0
+    
+    if results.multi_face_landmarks:
+        # Ambil wajah pertama
+        face_landmarks = results.multi_face_landmarks[0].landmark
 
-    if len(faces) > 0:
-        face = faces[0]
-        landmarks = predictor(gray, face)
+        # Helper untuk konversi normalized landmark ke pixel coordinates
+        def get_eye_coords(indices, landmarks):
+            coords = []
+            for i in indices:
+                pt = landmarks[i]
+                x = int(pt.x * img_w)
+                y = int(pt.y * img_h)
+                coords.append((x, y))
+            return np.array(coords)
 
-        left_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(36, 42)])
-        right_eye = np.array([(landmarks.part(i).x, landmarks.part(i).y) for i in range(42, 48)])
+        # Ambil koordinat mata kiri dan kanan
+        left_eye = get_eye_coords(LEFT_EYE_INDICES, face_landmarks)
+        right_eye = get_eye_coords(RIGHT_EYE_INDICES, face_landmarks)
 
+        # Hitung EAR
         ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
 
         if ear < ear_threshold and not EYE_CLOSED:
@@ -482,8 +475,9 @@ def process_frame():
             "blink_count": blink_count,
             "blink_rate": blink_rate
         })
+    # --- MEDIAPIPE LOGIC END ---
 
-    # Tidak ada wajah, tapi stream tetap dianggap hidup
+    # Jika tidak ada wajah terdeteksi
     message = "⚠️ Wajah tidak terdeteksi. Silakan posisikan ulang kamera."
     set_latest_stream_for_hw(
         hardware_id=hardware_id,
@@ -504,9 +498,6 @@ def process_frame():
     })
 
 
-# Backward compatible: stream terbaru apapun (tanpa device filter)
-# GET /stream/latest
-
 @app.route("/stream/latest", methods=["GET"])
 def get_latest_stream():
     if not is_stream_online():
@@ -514,7 +505,6 @@ def get_latest_stream():
     return jsonify({"status": "online", "data": LATEST_STREAM_DATA})
 
 
-# (Optional lama kamu)
 @app.route("/devices", methods=["GET"])
 def get_devices():
     user_id = request.args.get("user_id")
