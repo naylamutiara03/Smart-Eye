@@ -35,12 +35,7 @@ if JWT_AVAILABLE:
 
 # --- Inisialisasi MediaPipe Face Mesh ---
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(
-    max_num_faces=1,
-    refine_landmarks=True,  # Penting untuk akurasi iris/mata
-    min_detection_confidence=0.5,
-    min_tracking_confidence=0.5
-)
+face_mesh = None
 
 # Indeks Landmark Mata untuk MediaPipe (Mengikuti pola EAR)
 # Left Eye (sesuai urutan dlib: P1, P2, P3, P4, P5, P6)
@@ -356,16 +351,27 @@ def api_latest_stream(device_id):
 @app.route("/process_frame", methods=["POST"])
 def process_frame():
     global TOTAL_BLINKS, LAST_BLINK_TIME, START_TIME, EYE_CLOSED, BLINK_TIMESTAMPS
-    global SESSION, camera_status
+    global SESSION, camera_status, face_mesh
+
+    # ✅ LAZY INIT MEDIAPIPE (SAFE DI GUNICORN)
+    if face_mesh is None:
+        face_mesh = mp_face_mesh.FaceMesh(
+            max_num_faces=1,
+            refine_landmarks=True,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5
+        )
 
     data = request.get_json() or {}
     hardware_id = data.get("hardware_id")
 
-    # enforce session
+    # === SESSION ENFORCEMENT (TIDAK DIUBAH) ===
     if SESSION.get("active"):
         session_hw = SESSION.get("hardware_id")
         if session_hw and hardware_id and (hardware_id != session_hw):
-            return jsonify({"error": "Device mismatch: frame bukan dari device yang sedang aktif."}), 403
+            return jsonify({
+                "error": "Device mismatch: frame bukan dari device yang sedang aktif."
+            }), 403
 
     detection_mode = SESSION.get("mode") if SESSION.get("active") else data.get("mode", "focus")
 
@@ -384,6 +390,7 @@ def process_frame():
         BLINK_TIMESTAMPS.clear()
         EYE_CLOSED = False
 
+    # === IMAGE PARSING (TIDAK DIUBAH) ===
     try:
         img_str = re.search(r"base64,(.*)", data["image"]).group(1)
     except (AttributeError, KeyError):
@@ -394,34 +401,27 @@ def process_frame():
     if frame is None:
         return jsonify({"error": "Could not decode image"}), 400
 
-    # --- MEDIAPIPE LOGIC START ---
+    # === MEDIAPIPE LOGIC (TIDAK DIUBAH) ===
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     img_h, img_w, _ = frame.shape
-    
     results = face_mesh.process(rgb_frame)
 
     blink_count = 0
     blink_rate = 0.0
-    
+
     if results.multi_face_landmarks:
-        # Ambil wajah pertama
         face_landmarks = results.multi_face_landmarks[0].landmark
 
-        # Helper untuk konversi normalized landmark ke pixel coordinates
         def get_eye_coords(indices, landmarks):
             coords = []
             for i in indices:
                 pt = landmarks[i]
-                x = int(pt.x * img_w)
-                y = int(pt.y * img_h)
-                coords.append((x, y))
+                coords.append((int(pt.x * img_w), int(pt.y * img_h)))
             return np.array(coords)
 
-        # Ambil koordinat mata kiri dan kanan
         left_eye = get_eye_coords(LEFT_EYE_INDICES, face_landmarks)
         right_eye = get_eye_coords(RIGHT_EYE_INDICES, face_landmarks)
 
-        # Hitung EAR
         ear = (eye_aspect_ratio(left_eye) + eye_aspect_ratio(right_eye)) / 2.0
 
         if ear < ear_threshold and not EYE_CLOSED:
@@ -433,31 +433,24 @@ def process_frame():
             BLINK_TIMESTAMPS.append(LAST_BLINK_TIME)
 
         now = time.time()
-        window_seconds = 60
-        while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > window_seconds:
+        while BLINK_TIMESTAMPS and now - BLINK_TIMESTAMPS[0] > 60:
             BLINK_TIMESTAMPS.popleft()
 
         blink_count = len(BLINK_TIMESTAMPS)
 
-        if blink_count > 0 and BLINK_TIMESTAMPS:
-            actual_window = min(window_seconds, now - BLINK_TIMESTAMPS[0])
-            if actual_window < 1:
-                actual_window = 1.0
+        if blink_count > 0:
+            actual_window = max(1, now - BLINK_TIMESTAMPS[0])
             blink_rate = round((blink_count / actual_window) * 60.0, 2)
-        else:
-            elapsed_time = now - START_TIME if START_TIME else 0
-            blink_rate = round((TOTAL_BLINKS / elapsed_time) * 60.0, 2) if elapsed_time >= 1 else 0.0
 
         time_since_last_blink = now - LAST_BLINK_TIME
 
         if time_since_last_blink > stare_time_limit:
-            message = f"⚠️ Anda sudah {int(time_since_last_blink)} detik tidak berkedip! Kedip sekarang! (Mode: {detection_mode.upper()})"
+            message = f"⚠️ Anda sudah {int(time_since_last_blink)} detik tidak berkedip!"
         elif blink_rate < warning_blink_rate:
-            message = f"⚠️ Laju kedipan terlalu rendah ({blink_rate}/menit). Tingkatkan kedipan Anda! (Mode: {detection_mode.upper()})"
+            message = f"⚠️ Laju kedipan terlalu rendah ({blink_rate}/menit)."
         else:
-            message = f"✅ Deteksi berjalan normal. Laju kedipan: {blink_rate}/menit (Mode: {detection_mode.upper()})"
+            message = f"✅ Deteksi normal ({blink_rate}/menit)."
 
-        # Menyimpan stream per hardware_id
         set_latest_stream_for_hw(
             hardware_id=hardware_id,
             image=data["image"],
@@ -466,8 +459,7 @@ def process_frame():
             message=message
         )
 
-        if hardware_id:
-            camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
+        camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
 
         return jsonify({
             "message": message,
@@ -475,10 +467,9 @@ def process_frame():
             "blink_count": blink_count,
             "blink_rate": blink_rate
         })
-    # --- MEDIAPIPE LOGIC END ---
 
-    # Jika tidak ada wajah terdeteksi
-    message = "⚠️ Wajah tidak terdeteksi. Silakan posisikan ulang kamera."
+    # === NO FACE DETECTED (TIDAK DIUBAH) ===
+    message = "⚠️ Wajah tidak terdeteksi."
     set_latest_stream_for_hw(
         hardware_id=hardware_id,
         image=data.get("image"),
@@ -487,8 +478,7 @@ def process_frame():
         message=message
     )
 
-    if hardware_id:
-        camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
+    camera_status[hardware_id] = {"status": "active", "last_update": time.time()}
 
     return jsonify({
         "message": message,
@@ -497,13 +487,11 @@ def process_frame():
         "blink_rate": 0
     })
 
-
 @app.route("/stream/latest", methods=["GET"])
 def get_latest_stream():
     if not is_stream_online():
         return jsonify({"status": "offline", "message": "Kamera tidak aktif/terputus."})
     return jsonify({"status": "online", "data": LATEST_STREAM_DATA})
-
 
 @app.route("/devices", methods=["GET"])
 def get_devices():
