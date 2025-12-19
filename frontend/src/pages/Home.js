@@ -27,7 +27,7 @@ ChartJS.register(
   Filler
 );
 
-const API_URL = "https://smart-eye-n58f.onrender.com";
+const API_URL = "https://smart-eye-d5g3.onrender.com";
 
 function Home() {
   const [chartData, setChartData] = useState(null);

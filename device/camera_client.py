@@ -6,7 +6,7 @@ import uuid
 import os
 import json
 
-API_URL = "https://smart-eye-n58f.onrender.com/process_frame"
+API_URL = "https://smart-eye-d5g3.onrender.com/process_frame"
 CONFIG_FILE = "device_config.json"
 
 def get_or_create_hardware_id():
