@@ -4,7 +4,7 @@ import { supabase } from "../supabaseClient";
 import { useDevice } from "../contexts/DeviceContext";
 
 // Konfigurasi API
-const API_URL = "http://127.0.0.1:5000";
+const API_URL = "https://smart-eye-n58f.onrender.com";
 
 // Ikon menggunakan inline SVG (PlayIcon, StopIcon, CameraIcon, BlinksIcon, RateIcon)
 const PlayIcon = (props) => (

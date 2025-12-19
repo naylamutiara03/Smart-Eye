@@ -6,7 +6,7 @@ import uuid
 import os
 import json
 
-API_URL = "http://127.0.0.1:5000/process_frame"
+API_URL = "https://smart-eye-n58f.onrender.com/process_frame"
 CONFIG_FILE = "device_config.json"
 
 def get_or_create_hardware_id():
@@ -56,7 +56,7 @@ def run_camera():
                 'mode': 'focus' 
             }
             
-            response = requests.post(API_URL, json=payload, timeout=0.5)
+            response = requests.post(API_URL, json=payload, timeout=15)
             print(".", end="", flush=True)
             
         except requests.exceptions.ConnectionError:

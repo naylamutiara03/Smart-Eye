@@ -1,7 +1,6 @@
-FROM python:3.9-slim
+FROM python:3.10-slim
 
-# Install library sistem minimal untuk opencv
-# PERBAIKAN: Ganti 'libgl1-mesa-glx' menjadi 'libgl1'
+# Install library sistem yang dibutuhkan MediaPipe & OpenCV
 RUN apt-get update && apt-get install -y \
     libgl1 \
     libglib2.0-0 \
@@ -10,9 +9,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY requirements.txt .
+RUN pip install --upgrade pip
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Jalankan aplikasi
 CMD ["gunicorn", "-b", "0.0.0.0:10000", "app:app"]

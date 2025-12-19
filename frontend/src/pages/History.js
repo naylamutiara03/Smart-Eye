@@ -6,7 +6,7 @@ import { useNavigate } from "react-router-dom";
 
 import { AlertTriangle, Clock, Eye, Activity, Zap } from "feather-icons-react";
 
-const API_URL = "http://127.0.0.1:5000";
+const API_URL = "https://smart-eye-n58f.onrender.com";
 
 function History() {
   const [records, setRecords] = useState([]);

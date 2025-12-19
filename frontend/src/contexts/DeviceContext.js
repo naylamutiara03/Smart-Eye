@@ -14,7 +14,7 @@ export const DeviceProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [activeDeviceId, setActiveDeviceId] = useState(null); // ID hardware yang terdeteksi otomatis
 
-  const API_URL = "http://127.0.0.1:5000"; // Sesuaikan port backend
+  const API_URL = "https://smart-eye-n58f.onrender.com"; // Sesuaikan port backend
 
   // 1. Cek User Session
   useEffect(() => {
